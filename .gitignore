@@ -1,0 +1,24 @@
+# Local environment files (keep the example)
+.env
+.env.*
+!.env.example
+
+# Node / frontend
+node_modules/
+dist/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+build/
+
+# Go build output
+backend/server
+backend/server.exe
+
+# Local runtime data (Docker named volumes live outside the tree; keep stray data out)
+data/
+service_exampl/models/

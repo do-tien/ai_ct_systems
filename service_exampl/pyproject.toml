@@ -1,0 +1,13 @@
+[build-system]
+requires = ["setuptools==84.0.0", "wheel==0.48.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nodule-ai"
+version = "0.1.0"
+description = "Packaging for the nodule-reader AI worker (no inference implemented yet)."
+requires-python = ">=3.11,<3.12"
+dependencies = []
+
+[tool.setuptools.packages.find]
+where = ["src"]

@@ -1,0 +1,144 @@
+:root {
+  color-scheme: light dark;
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  line-height: 1.5;
+}
+
+body {
+  margin: 0;
+  background: #f6f7f9;
+  color: #1c1f24;
+}
+
+.page {
+  max-width: 40rem;
+  margin: 0 auto;
+  padding: 1.5rem 1rem 3rem;
+}
+
+.page-header h1 {
+  font-size: 1.4rem;
+  margin-bottom: 0.25rem;
+}
+
+.notice {
+  margin: 0 0 1.5rem;
+  padding: 0.5rem 0.75rem;
+  border-left: 4px solid #b45309;
+  background: #fef3c7;
+  color: #7c2d12;
+  border-radius: 4px;
+}
+
+.panel {
+  background: #ffffff;
+  border: 1px solid #d6d9de;
+  border-radius: 8px;
+  padding: 1rem;
+}
+
+.panel h2 {
+  font-size: 1.05rem;
+  margin-top: 0;
+}
+
+.status-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 1rem;
+}
+
+.status-table th,
+.status-table td {
+  text-align: left;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid #e4e7ec;
+}
+
+.status {
+  font-weight: 600;
+}
+
+.status-ok {
+  color: #0a7d33;
+}
+
+.status-unavailable {
+  color: #b91c1c;
+}
+
+.status-loading,
+.status-unknown {
+  color: #4b5563;
+}
+
+button {
+  font: inherit;
+  padding: 0.5rem 1rem;
+  border: 1px solid #1d4ed8;
+  background: #1d4ed8;
+  color: #ffffff;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+button:focus-visible {
+  outline: 2px solid #1d4ed8;
+  outline-offset: 2px;
+}
+
+.error {
+  margin: 1rem 0 0;
+  padding: 0.5rem 0.75rem;
+  border-left: 4px solid #b91c1c;
+  background: #fee2e2;
+  color: #7f1d1d;
+  border-radius: 4px;
+}
+
+@media (prefers-color-scheme: dark) {
+  body {
+    background: #14161a;
+    color: #e6e8eb;
+  }
+
+  .panel {
+    background: #1d2025;
+    border-color: #333941;
+  }
+
+  .status-table th,
+  .status-table td {
+    border-bottom-color: #2b3038;
+  }
+
+  .notice {
+    background: #3a2a12;
+    border-left-color: #f59e0b;
+    color: #fde68a;
+  }
+
+  .error {
+    background: #3a1414;
+    border-left-color: #ef4444;
+    color: #fecaca;
+  }
+
+  .status-ok {
+    color: #4ade80;
+  }
+
+  .status-unavailable {
+    color: #f87171;
+  }
+
+  .status-loading,
+  .status-unknown {
+    color: #9ca3af;
+  }
+}
