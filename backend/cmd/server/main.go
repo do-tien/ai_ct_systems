@@ -1,5 +1,7 @@
 // Command server runs the nodule-reader backend: a chi HTTP server exposing a
-// connection-aware health endpoint for the browser-facing frontend.
+// connection-aware health endpoint for the browser-facing frontend. It is the
+// composition root: it reads configuration once, builds the concrete
+// dependencies, wires them, and owns process lifecycle and cleanup.
 package main
 
 import (
@@ -9,14 +11,14 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
-
-	"nodule-reader/backend/internal/api"
+	"nodule-reader/backend/internal/application/health"
 	"nodule-reader/backend/internal/config"
+	"nodule-reader/backend/internal/infrastructure/orthanc"
+	"nodule-reader/backend/internal/infrastructure/postgres"
+	httpapi "nodule-reader/backend/internal/transport/http"
 )
 
 func main() {
@@ -26,19 +28,31 @@ func main() {
 		os.Exit(1)
 	}
 
-	pool, err := newPool(context.Background(), cfg)
+	pool, err := postgres.NewPool(context.Background(), postgres.Settings{
+		Host:     cfg.PostgresHost,
+		Port:     cfg.PostgresPort,
+		Database: cfg.PostgresDB,
+		User:     cfg.PostgresUser,
+		Password: cfg.PostgresPassword,
+	})
 	if err != nil {
 		log.Printf("postgres configuration error: %v", err)
 		os.Exit(1)
 	}
 	defer pool.Close()
 
-	orthancClient := &http.Client{Timeout: 2 * time.Second}
-	orthancURL := strings.TrimRight(cfg.OrthancURL, "/")
+	orthancClient := orthanc.NewClient(
+		&http.Client{Timeout: 2 * time.Second},
+		cfg.OrthancURL,
+		cfg.OrthancUser,
+		cfg.OrthancPassword,
+	)
+
+	healthService := health.NewService(postgres.NewPoolProbe(pool), orthancClient)
 
 	server := &http.Server{
 		Addr:              cfg.HTTPAddr,
-		Handler:           api.NewRouter(pool, orthancClient, orthancURL, cfg.OrthancUser, cfg.OrthancPassword),
+		Handler:           httpapi.NewRouter(healthService),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
@@ -49,23 +63,6 @@ func main() {
 		log.Printf("server error: %v", err)
 		os.Exit(1)
 	}
-}
-
-func newPool(ctx context.Context, cfg config.Config) (*pgxpool.Pool, error) {
-	// The base config carries no credentials; each field is assigned from
-	// validated configuration. SSL is disabled because the backend and
-	// PostgreSQL communicate over the local Docker network only.
-	poolConfig, err := pgxpool.ParseConfig("postgres://localhost:5432/postgres?sslmode=disable")
-	if err != nil {
-		return nil, err
-	}
-	poolConfig.ConnConfig.Host = cfg.PostgresHost
-	poolConfig.ConnConfig.Port = uint16(cfg.PostgresPort)
-	poolConfig.ConnConfig.Database = cfg.PostgresDB
-	poolConfig.ConnConfig.User = cfg.PostgresUser
-	poolConfig.ConnConfig.Password = cfg.PostgresPassword
-	poolConfig.MaxConns = 4
-	return pgxpool.NewWithConfig(ctx, poolConfig)
 }
 
 func handleShutdown(server *http.Server) {
