@@ -210,57 +210,39 @@ def collect_hardware(device: str) -> dict:
     return hardware
 
 
+def _engine_stub():
+    """The shared minimal engine proxy for MONAI's CheckpointLoader."""
+    from .bundle_runtime import engine_stub
+
+    return engine_stub()
+
+
 def _verify_device(device: str) -> None:
     """Reject an unusable requested device; never fall back to CPU."""
-    import torch
+    from .bundle_runtime import BundleError, validate_device
 
-    if not device.startswith("cuda"):
-        return
-    if not torch.cuda.is_available():
-        raise CheckError("device_unavailable", f"requested device {device} is not available")
-    index = int(device.split(":")[1]) if ":" in device else 0
-    if index >= torch.cuda.device_count():
-        raise CheckError("device_unavailable", f"requested device {device} does not exist")
-
-
-def _engine_stub():
-    """Minimal engine proxy for MONAI's CheckpointLoader.
-
-    MONAI's handler reads ``state.max_epochs`` and, when it is not ``None``,
-    ``state.epoch``; both must exist for the load to complete.
-    """
-    # max_epochs=None keeps MONAI's handler from comparing against an epoch
-    # count; epoch exists in case a future handler reads it unconditionally.
-    return SimpleNamespace(state=SimpleNamespace(max_epochs=None, epoch=0))
+    try:
+        validate_device(device)
+    except BundleError as exc:
+        raise CheckError("device_unavailable", str(exc)) from exc
 
 
 def _load_checkpoint(bundle_dir: Path, device: str) -> tuple[float, dict]:
-    """Initialise the bundle network and load the trained checkpoint strictly."""
-    import torch
-    from monai.bundle import ConfigParser
+    """Load the trained checkpoint strictly, without running a forward pass.
 
-    _verify_device(device)
+    Shares the LC1-05 loader; the verifier keeps its own failure codes and its
+    measured metric (checkpoint-load seconds only).
+    """
+    from .bundle_runtime import BundleError, load_bundle
 
-    config_file = bundle_dir / CONFIG_PATH
-    if not config_file.is_file():
-        raise ValueError(f"bundle inference config is missing: {config_file}")
-
-    parser = ConfigParser(config_file=str(config_file))
-    parser["bundle_root"] = str(bundle_dir)
-    parser["device"] = torch.device(device)
     try:
-        network = parser.get_parsed_content("network")
-        loader = parser.get_parsed_content("checkpointloader")
-    except Exception as exc:
-        raise CheckError("model_load_failed", f"cannot initialise the bundle network: {exc}") from exc
-    # Explicit device; never the bundle's auto-device fallback.
-    loader.map_location = device
-    started = time.perf_counter()
-    try:
-        loader(_engine_stub())
-    except Exception as exc:
-        raise CheckError("model_load_failed", f"checkpoint load failed: {exc}") from exc
-    elapsed = time.perf_counter() - started
+        _, network, elapsed = load_bundle(bundle_dir, device, resample=False)
+    except BundleError as exc:
+        if exc.code == "DEVICE_UNAVAILABLE":
+            raise CheckError("device_unavailable", str(exc)) from exc
+        if exc.code == "BUNDLE_INVALID":
+            raise ValueError(str(exc)) from exc
+        raise CheckError("model_load_failed", str(exc)) from exc
     parameters = sum(p.numel() for p in network.parameters())
     return elapsed, {"parameters": int(parameters), "device": device}
 

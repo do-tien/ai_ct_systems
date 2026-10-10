@@ -33,6 +33,8 @@ ai = [
     "pytorch-ignite==0.4.11",
     "tensorboard==2.17.0",
     "SimpleITK==2.4.0",
+    "pydicom==2.4.4",  # geometry decode used by the inference CLI
+    "psutil==6.0.0",  # portable peak-RSS sampling
 ]
 
 # Native geometry/volume tooling (LC1-04): SimpleITK decode + nibabel NIfTI.
