@@ -5,9 +5,19 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "nodule-ai"
 version = "0.1.0"
-description = "Packaging for the nodule-reader AI worker (no inference implemented yet)."
+description = "Packaging for the nodule-reader AI worker: LIDC data tools only, no inference implemented yet."
 requires-python = ">=3.11,<3.12"
 dependencies = []
+
+[project.optional-dependencies]
+# Native data/reference tooling (LC1-02). Exact resolved set is frozen in
+# requirements-data.txt; these bounds describe the intended compatible range.
+data = [
+    "idc-index==0.13.0",
+    "pylidc==0.2.3",
+    "numpy==1.23.5",  # pylidc 0.2.3 uses np.int, removed in numpy 1.24
+    "pydicom==2.4.4",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]

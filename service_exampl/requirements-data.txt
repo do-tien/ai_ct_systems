@@ -1,0 +1,44 @@
+# LC1-02 native data/reference tools lock (Windows x64, Python 3.11.9).
+# Installed and smoke-tested; see docs/lc1-02-data-reference.md.
+# Exact resolved direct+transitive set for the 'data' extra (pyproject.toml).
+# Excludes the local nodule-ai package itself.
+ImageIO==2.38.1
+SQLAlchemy==1.4.54
+certifi==2026.7.22
+charset-normalizer==3.5.2
+click==8.5.0
+colorama==0.4.6
+contourpy==1.2.1
+cycler==0.12.1
+duckdb==1.5.6
+fonttools==4.66.1
+greenlet==3.5.6
+idc-index==0.13.0
+idc-index-data==25.0.0
+idna==3.20
+kiwisolver==1.5.1
+lazy-loader==0.6
+matplotlib==3.8.4
+networkx==3.6.1
+numpy==1.23.5
+packaging==26.3
+pandas==2.2.3
+pillow==12.3.0
+platformdirs==4.12.4
+psutil==7.2.2
+pyarrow==17.0.0
+pydicom==2.4.4
+pylidc==0.2.3
+pyparsing==3.3.3
+python-dateutil==2.9.0.post0
+pytz==2026.5
+requests==2.34.2
+s5cmd==0.3.3
+scikit-image==0.22.0
+scipy==1.11.4
+setuptools==80.9.0
+six==1.17.0
+tifffile==2026.3.3
+tqdm==4.70.1
+tzdata==2026.5
+urllib3==2.8.0
