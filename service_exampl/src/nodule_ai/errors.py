@@ -19,6 +19,18 @@ class DataError(NoduleAIError):
     exit_code = 2
 
 
+class GeometryError(DataError):
+    """Geometry/volume failure carrying a stable machine-readable code.
+
+    ``code`` is part of the LC1-04 contract consumed by LC1-05/06 evidence; the
+    exit code stays 2 so existing callers keep working.
+    """
+
+    def __init__(self, message: str, *, code: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
 class ToolError(NoduleAIError):
     """Network, filesystem or dependency failure while running a tool."""
 

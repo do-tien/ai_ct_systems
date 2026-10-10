@@ -15,7 +15,7 @@ import pydicom
 from pydicom.dataset import Dataset, FileMetaDataset
 from pydicom.uid import CTImageStorage, ExplicitVRLittleEndian
 
-from nodule_ai.dicom_geometry import DataError, read_series_metadata
+from nodule_ai.dicom_geometry import DataError, GeometryError, read_series_metadata
 from nodule_ai.fetch_case import fetch_case
 
 STUDY_UID = "1.3.6.1.4.1.14519.5.2.1.6279.6001.100000000000000000000000000001"
@@ -267,6 +267,93 @@ class FetchCaseTests(unittest.TestCase):
             code = main(["--selection", str(selection_path), "--out", str(out)])
             self.assertEqual(code, 2)
             self.assertFalse((out / MANIFEST_NAME).exists())
+
+
+class GeometryErrorCodeTests(unittest.TestCase):
+    """Pin the stable error codes the LC1-05/06 consumers rely on."""
+
+    def _code(self, directory: Path) -> str:
+        with self.assertRaises(GeometryError) as raised:
+            read_series_metadata(directory)
+        return raised.exception.code
+
+    def test_missing_frame_uid_code(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            write_series(directory, z_positions=[0.0, 1.0], frame_uid="")
+            self.assertEqual(self._code(directory), "INVALID_UID")
+
+    def test_identity_mismatch_code(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            write_series(directory, z_positions=[0.0, 1.0])
+            write_slice(
+                directory / "other-study.dcm",
+                sop_instance_uid=_sop(9),
+                study_uid="1.3.6.1.4.1.14519.5.2.1.6279.6001.999999999999999999999999999999",
+                z_mm=2.0,
+            )
+            self.assertEqual(self._code(directory), "UID_MISMATCH")
+
+    def test_missing_numeric_tag_code(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            paths = write_series(directory, z_positions=[0.0, 1.0])
+            ds = pydicom.dcmread(paths[0])
+            del ds.PixelSpacing
+            ds.save_as(paths[0], write_like_original=False)
+            self.assertEqual(self._code(directory), "INVALID_GEOMETRY")
+
+    def test_duplicate_position_code(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            write_series(directory, z_positions=[0.0, 1.0])
+            write_slice(directory / "dupe-pos.dcm", sop_instance_uid=_sop(5), z_mm=1.0)
+            self.assertEqual(self._code(directory), "DUPLICATE_POSITION")
+
+    def test_nonuniform_and_too_large_spacing_codes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            write_series(directory, z_positions=[0.0, 1.0, 2.5])
+            self.assertEqual(self._code(directory), "NONUNIFORM_SPACING")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            write_series(directory, z_positions=[0.0, 4.0], thickness=1.0)
+            self.assertEqual(self._code(directory), "SLICE_SPACING_TOO_LARGE")
+
+    def test_thickness_code(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            write_series(directory, z_positions=[0.0, 1.0], thickness=3.0)
+            self.assertEqual(self._code(directory), "SLICE_TOO_THICK")
+
+    def test_tilt_and_modality_codes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            write_series(directory, z_positions=[0.0, 1.0])
+            write_slice(directory / "drift.dcm", sop_instance_uid=_sop(5), z_mm=2.0, ipp_xy=(0.5, 0.0))
+            self.assertEqual(self._code(directory), "UNSUPPORTED_GANTRY_TILT")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            write_series(directory, z_positions=[0.0, 1.0], modality="MR")
+            self.assertEqual(self._code(directory), "NOT_CT")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            write_series(directory, z_positions=[0.0, 1.0], number_of_frames=4)
+            self.assertEqual(self._code(directory), "UNSUPPORTED_CT")
+
+    def test_ordered_files_track_sop_order(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            write_series(directory, z_positions=[2.0, 0.0, 1.0])
+            metadata = read_series_metadata(directory)
+            self.assertIsInstance(metadata["ordered_files"][0], Path)
+            self.assertEqual(len(metadata["ordered_files"]), 3)
+            names = [path.name for path in metadata["ordered_files"]]
+            self.assertEqual(names, ["slice-001.dcm", "slice-002.dcm", "slice-000.dcm"])
 
 
 if __name__ == "__main__":
