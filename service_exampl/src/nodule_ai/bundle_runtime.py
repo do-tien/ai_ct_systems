@@ -92,14 +92,20 @@ def check_bundle(bundle_dir: Path, *, require_weights: bool = True) -> dict:
     if not config.is_file() or not metadata_path.is_file():
         raise BundleError("bundle configuration is missing", code="BUNDLE_INVALID")
     try:
-        version = json.loads(metadata_path.read_text(encoding="utf-8")).get("version")
-    except json.JSONDecodeError as exc:
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError, UnicodeDecodeError) as exc:
         raise BundleError("bundle metadata is not valid JSON", code="BUNDLE_INVALID") from exc
+    if not isinstance(metadata, dict):
+        raise BundleError("bundle metadata is not an object", code="BUNDLE_INVALID")
+    version = metadata.get("version")
     if version != EXPECTED_BUNDLE_VERSION:
         raise BundleError(f"unexpected bundle version {version!r}", code="BUNDLE_INVALID")
     if require_weights and not (bundle_dir / CHECKPOINT_PATH).is_file():
         raise BundleError("bundle checkpoint is missing", code="BUNDLE_INVALID")
-    return json.loads(config.read_text(encoding="utf-8"))
+    try:
+        return json.loads(config.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError, UnicodeDecodeError) as exc:
+        raise BundleError("bundle configuration is not valid JSON", code="BUNDLE_INVALID") from exc
 
 
 def _build_parser(bundle_dir: Path, device: str, score_threshold: float, *, resample: bool):
@@ -197,6 +203,21 @@ def _validate_prediction(prediction: object) -> dict:
     return prediction
 
 
+def _validate_postprocessed_box(box, expected_count: int) -> None:
+    """Reject impossible world boxes before they reach candidate filtering."""
+    import torch
+
+    if not isinstance(box, torch.Tensor) or box.dim() != 2 or box.shape[1] != 6:
+        raise BundleError("postprocessed boxes are malformed", code="INVALID_MODEL_OUTPUT")
+    if int(box.shape[0]) != expected_count:
+        raise BundleError("postprocessed box count differs from the scores", code="INVALID_MODEL_OUTPUT")
+    if not bool(torch.isfinite(box).all()):
+        raise BundleError("postprocessed boxes contain non-finite values", code="INVALID_MODEL_OUTPUT")
+    if box.shape[0]:
+        if not bool((box[:, 3:] > 0).all()):
+            raise BundleError("postprocessed box extents must be positive", code="INVALID_MODEL_OUTPUT")
+
+
 def predict_nifti(parser, network, nifti_path: Path) -> dict:
     """Run one image through preprocessing, the detector and postprocessing.
 
@@ -253,6 +274,5 @@ def predict_nifti(parser, network, nifti_path: Path) -> dict:
     except Exception as exc:
         raise BundleError("postprocessing failed", code="INFERENCE_FAILED") from exc
     box = postprocessed["box"]
-    if box.dim() != 2 or box.shape[1] != 6 or box.shape[0] != prediction["label_scores"].shape[0]:
-        raise BundleError("postprocessed boxes are malformed", code="INVALID_MODEL_OUTPUT")
+    _validate_postprocessed_box(box, int(prediction["label_scores"].shape[0]))
     return {"box": box, "label_scores": prediction["label_scores"], "label": prediction["label"]}

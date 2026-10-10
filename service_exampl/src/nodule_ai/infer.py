@@ -299,6 +299,13 @@ def main(argv: list[str] | None = None) -> int:
     bundle_dir = Path(bundle_values[-1]) if bundle_values else None
     out, out_error = _resolve_output(argv)
 
+    # Safety first: never publish anything inside input/bundle data, even when
+    # other arguments are invalid (an argparse failure must not be able to write
+    # an error document over a source file).
+    if out is not None and (_is_inside(out, series_dir) or _is_inside(out, bundle_dir)):
+        print("infer: INVALID_OUTPUT_PATH", file=sys.stderr)
+        return EXIT_OPERATIONAL
+
     # A parser failure must not leave a previous success at the dedicated --out.
     _clear_stale_output(out, series_dir, bundle_dir)
 
@@ -374,6 +381,10 @@ def _map_error(exc: Exception) -> tuple[str, int]:
 
     if isinstance(exc, MeasurementError):
         return "RESOURCE_MEASUREMENT_FAILED", EXIT_OPERATIONAL
+    if isinstance(exc, ValueError):
+        # Malformed prediction/result values: a model-output failure, not a
+        # generic internal error.
+        return "INVALID_MODEL_OUTPUT", EXIT_MODEL
 
     if isinstance(exc, GeometryError):
         code = exc.code

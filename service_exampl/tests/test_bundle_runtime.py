@@ -63,6 +63,41 @@ class BundleGuardTests(unittest.TestCase):
                 check_bundle(root, require_weights=True)
             self.assertEqual(raised.exception.code, "BUNDLE_INVALID")
 
+    def test_corrupt_bundle_configuration_is_bundle_invalid(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = _write_bundle(Path(tmp) / "bundle")
+            (root / "configs" / "inference.json").write_text("{not json", encoding="utf-8")
+            with self.assertRaises(BundleError) as raised:
+                check_bundle(root)
+            self.assertEqual(raised.exception.code, "BUNDLE_INVALID")
+
+    def test_non_object_bundle_metadata_is_bundle_invalid(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = _write_bundle(Path(tmp) / "bundle")
+            (root / "configs" / "metadata.json").write_text("[1, 2]", encoding="utf-8")
+            with self.assertRaises(BundleError) as raised:
+                check_bundle(root)
+            self.assertEqual(raised.exception.code, "BUNDLE_INVALID")
+
+    @unittest.skipUnless(HAS_TORCH, "requires torch for the postprocessed-box guard")
+    def test_postprocessed_box_guard_rejects_impossible_geometry(self):
+        import torch
+
+        from nodule_ai.bundle_runtime import _validate_postprocessed_box
+
+        good = torch.tensor([[0.0, 0.0, 0.0, 2.0, 2.0, 2.0]])
+        _validate_postprocessed_box(good, 1)
+        for bad in (
+            torch.tensor([[0.0, 0.0, 0.0, 0.0, 2.0, 2.0]]),
+            torch.tensor([[0.0, 0.0, 0.0, -2.0, 2.0, 2.0]]),
+            torch.tensor([[float("nan"), 0.0, 0.0, 2.0, 2.0, 2.0]]),
+            torch.tensor([[0.0, 0.0, 0.0, 2.0, 2.0, 2.0], [0.0, 0.0, 0.0, 2.0, 2.0, 2.0]]),
+        ):
+            with self.subTest(bad=bad.tolist()):
+                with self.assertRaises(BundleError) as raised:
+                    _validate_postprocessed_box(bad, 1)
+                self.assertEqual(raised.exception.code, "INVALID_MODEL_OUTPUT")
+
     def test_load_bundle_validates_before_touching_torch(self):
         with tempfile.TemporaryDirectory() as tmp:
             with self.assertRaises(BundleError) as raised:

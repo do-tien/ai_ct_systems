@@ -204,6 +204,37 @@ class InferCliTests(unittest.TestCase):
             self.assertFalse(out.exists())
             self.assertEqual(sorted((path.name, path.stat().st_size) for path in directory.iterdir()), before)
 
+    def test_invalid_arguments_cannot_write_into_the_series_directory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            directory = self._series(root)
+            before = sorted((p.name, p.stat().st_size) for p in directory.iterdir())
+            out = directory / "result.json"
+
+            completed = self._run(
+                ["--series-dir", str(directory), "--out", str(out),
+                 "--bundle-dir", str(root / "no-bundle"), "--score-threshold", "nan"]
+            )
+            self.assertEqual(completed.returncode, 1, completed.stderr)
+            self.assertIn("INVALID_OUTPUT_PATH", completed.stderr)
+            self.assertFalse(out.exists())
+            self.assertEqual(sorted((p.name, p.stat().st_size) for p in directory.iterdir()), before)
+
+    def test_invalid_arguments_cannot_overwrite_a_source_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            directory = self._series(root)
+            victim = sorted(directory.iterdir())[0]
+            original = victim.read_bytes()
+
+            completed = self._run(
+                ["--series-dir", str(directory), "--out", str(victim),
+                 "--bundle-dir", str(root / "no-bundle"), "--score-threshold", "nan"]
+            )
+            self.assertEqual(completed.returncode, 1, completed.stderr)
+            self.assertIn("INVALID_OUTPUT_PATH", completed.stderr)
+            self.assertEqual(victim.read_bytes(), original)
+
     def test_error_publication_failure_is_nonzero_and_leaves_no_stale_success(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -251,6 +282,13 @@ class DependencyFailureTests(unittest.TestCase):
             )
             self.assertEqual(completed.returncode, 1, completed.stderr)
             self.assertEqual(json.loads(out.read_text(encoding="utf-8"))["error"]["code"], "TOOL_ERROR")
+
+
+class ErrorMappingTests(unittest.TestCase):
+    def test_malformed_prediction_maps_to_invalid_model_output(self):
+        from nodule_ai.infer import _map_error
+
+        self.assertEqual(_map_error(ValueError("boxes must be positive")), ("INVALID_MODEL_OUTPUT", 3))
 
 
 class PeakRssSamplerTests(unittest.TestCase):
