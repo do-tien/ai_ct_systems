@@ -278,6 +278,7 @@ def _eligible_cluster(ids, session_ids, diameters, reference_id="nodule-abc"):
 
 
 HAS_PANDAS = importlib.util.find_spec("pandas") is not None
+HAS_PYDICOM = importlib.util.find_spec("pydicom") is not None
 
 
 @unittest.skipUnless(HAS_PANDAS, "requires the data environment (pandas for the IDC index stand-in)")
@@ -500,6 +501,7 @@ class ReferenceTests(unittest.TestCase):
             self.assertEqual(unrelated.read_bytes(), b"keep me")
 
 
+@unittest.skipUnless(HAS_PYDICOM, "requires the data/geometry environment (pydicom)")
 class CliStaleOutputTests(unittest.TestCase):
     def test_reference_cli_removes_stale_output_before_failing(self):
         from nodule_ai import reference_nodules

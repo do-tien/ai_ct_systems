@@ -8,9 +8,12 @@ import unittest
 from pathlib import Path
 
 import numpy as np
-import pydicom
-from pydicom.dataset import Dataset, FileMetaDataset
-from pydicom.uid import CTImageStorage, ExplicitVRLittleEndian
+
+HAS_PYDICOM = importlib.util.find_spec("pydicom") is not None
+if HAS_PYDICOM:
+    import pydicom
+    from pydicom.dataset import Dataset, FileMetaDataset
+    from pydicom.uid import CTImageStorage, ExplicitVRLittleEndian
 
 from nodule_ai.dicom_geometry import lps_to_ras_affine
 from nodule_ai.errors import GeometryError
@@ -105,7 +108,7 @@ def make_series(directory: Path, planes, *, iop=IOP_IDENTITY, spacing=(0.7, 0.7)
     return paths
 
 
-@unittest.skipUnless(HAS_SITK, "requires the geometry environment (SimpleITK)")
+@unittest.skipUnless(HAS_SITK and HAS_PYDICOM, "requires the geometry environment (SimpleITK + pydicom)")
 class VolumeDecodeTests(unittest.TestCase):
     def test_volume_orders_pixels_by_ipp(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -198,7 +201,7 @@ class VolumeDecodeTests(unittest.TestCase):
         self.assertEqual(raised.exception.code, "INVALID_PIXEL_DATA")
 
 
-@unittest.skipUnless(HAS_SITK, "requires the geometry environment (SimpleITK)")
+@unittest.skipUnless(HAS_SITK and HAS_PYDICOM, "requires the geometry environment (SimpleITK + pydicom)")
 class NiftiTests(unittest.TestCase):
     def test_nifti_oblique_anisotropic_affine_and_pixels(self):
         import nibabel as nib

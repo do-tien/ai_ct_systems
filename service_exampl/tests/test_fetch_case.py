@@ -11,9 +11,13 @@ import tempfile
 import unittest
 from pathlib import Path
 
-import pydicom
-from pydicom.dataset import Dataset, FileMetaDataset
-from pydicom.uid import CTImageStorage, ExplicitVRLittleEndian
+import importlib.util
+
+HAS_PYDICOM = importlib.util.find_spec("pydicom") is not None
+if HAS_PYDICOM:
+    import pydicom
+    from pydicom.dataset import Dataset, FileMetaDataset
+    from pydicom.uid import CTImageStorage, ExplicitVRLittleEndian
 
 from nodule_ai.dicom_geometry import DataError, GeometryError, read_series_metadata
 from nodule_ai.fetch_case import fetch_case
@@ -118,6 +122,7 @@ class FakeIDCClient:
         self._builder(seriesInstanceUID, target)
 
 
+@unittest.skipUnless(HAS_PYDICOM, "requires the data/geometry environment (pydicom)")
 class ReadSeriesMetadataTests(unittest.TestCase):
     def test_accepts_uniform_stack_and_sorts_by_position(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -197,6 +202,7 @@ class ReadSeriesMetadataTests(unittest.TestCase):
                 read_series_metadata(directory)
 
 
+@unittest.skipUnless(HAS_PYDICOM, "requires the data/geometry environment (pydicom)")
 class FetchCaseTests(unittest.TestCase):
     def _builder(self, series_uid, target):
         if series_uid == SERIES_A:
@@ -269,6 +275,7 @@ class FetchCaseTests(unittest.TestCase):
             self.assertFalse((out / MANIFEST_NAME).exists())
 
 
+@unittest.skipUnless(HAS_PYDICOM, "requires the data/geometry environment (pydicom)")
 class GeometryErrorCodeTests(unittest.TestCase):
     """Pin the stable error codes the LC1-05/06 consumers rely on."""
 

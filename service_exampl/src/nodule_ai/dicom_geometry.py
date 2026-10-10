@@ -13,8 +13,6 @@ from pathlib import Path
 from typing import Sequence
 
 import numpy as np
-import pydicom
-from pydicom.uid import CTImageStorage
 
 from .errors import DataError, GeometryError
 
@@ -206,6 +204,11 @@ def read_series_metadata(series_dir: Path) -> dict:
     by ascending projection of ImagePositionPatient onto the slice normal, never
     by filename or InstanceNumber. ``ordered_files`` follows that same order.
     """
+    # Imported lazily so the pure coordinate maths (and the transform probe) can
+    # run in environments that do not install pydicom.
+    import pydicom
+    from pydicom.uid import CTImageStorage
+
     series_dir = Path(series_dir)
     if not series_dir.is_dir():
         raise _geometry(f"series directory does not exist: {series_dir}", "INVALID_DICOM")
