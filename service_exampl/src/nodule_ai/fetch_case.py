@@ -66,6 +66,12 @@ def _load_selection(path: Path) -> dict:
         raise DataError(f"selection file is not valid JSON: {exc}") from exc
 
 
+def _new_idc_client():
+    from idc_index import IDCClient
+
+    return IDCClient()
+
+
 def _build_client(selection: dict):
     """Create the pinned-version IDC client after checking frozen index versions."""
     source = selection["source"]
@@ -75,9 +81,7 @@ def _build_client(selection: dict):
             "installed idc-index-data version "
             f"{installed} does not match frozen selection {source['idc_index_data_version']}"
         )
-    from idc_index import IDCClient
-
-    client = IDCClient()
+    client = _new_idc_client()
     actual = client.get_idc_version()
     if actual != source["idc_version"]:
         raise DataError(
@@ -196,32 +200,64 @@ def fetch_case(selection: dict, out_dir: Path, *, client=None, dir_template: str
     return manifest
 
 
+def select_case_document(annotations_dir: Path, out: Path) -> dict:
+    """Freeze a selection from the pylidc shortlist; XML comes before any CT download."""
+    import pylidc as pl
+
+    from .dicom_geometry import MAX_SLICE_THICKNESS_MM
+    from .reference_nodules import ensure_annotations, select_case
+
+    annotations_dir = Path(annotations_dir)
+    _, archive = ensure_annotations(annotations_dir)
+    scans = [
+        scan
+        for scan in pl.query(pl.Scan).all()
+        if scan.slice_thickness and float(scan.slice_thickness) <= MAX_SLICE_THICKNESS_MM
+    ]
+    selection = select_case(_new_idc_client(), scans, annotations_dir)
+    selection["artifacts"]["annotations_archive"] = archive
+    _write_json_atomic(Path(out), selection)
+    return selection
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="nodule_ai.fetch_case",
-        description="Download and validate one frozen LIDC-IDRI CT series (LC1-02).",
+        description="Freeze a selection or download one frozen LIDC-IDRI CT series (LC1-02).",
     )
-    parser.add_argument("--selection", required=True, type=Path, help="frozen selection JSON")
-    parser.add_argument("--out", required=True, type=Path, help="output directory (private, ignored)")
+    parser.add_argument("--select", action="store_true", help="freeze a selection instead of fetching")
+    parser.add_argument("--selection", type=Path, help="frozen selection JSON (fetch mode)")
+    parser.add_argument("--annotations-dir", type=Path, help="TCIA XML annotations directory (select mode)")
+    parser.add_argument("--out", required=True, type=Path, help="output file (select) or directory (fetch)")
     args = parser.parse_args(argv)
 
+    if args.select and not args.annotations_dir:
+        parser.error("--select requires --annotations-dir")
+    if not args.select and not args.selection:
+        parser.error("--selection is required unless --select is used")
+
     try:
-        selection = _load_selection(args.selection)
-        manifest = fetch_case(selection, args.out)
+        if args.select:
+            selection = select_case_document(args.annotations_dir, args.out)
+            summary = {
+                "series_instance_uid": selection["series_instance_uid"],
+                "target_reference_id": selection["target_reference_id"],
+                "clusters": len(selection["clusters"]),
+                "selection": str(args.out),
+            }
+        else:
+            selection = _load_selection(args.selection)
+            manifest = fetch_case(selection, args.out)
+            summary = {
+                "series_instance_uid": manifest["series_instance_uid"],
+                "num_slices": manifest["num_slices"],
+                "manifest": str(Path(args.out) / MANIFEST_NAME),
+            }
     except NoduleAIError as exc:
         print(f"fetch_case: {exc}", file=sys.stderr)
         return exc.exit_code
 
-    print(
-        json.dumps(
-            {
-                "series_instance_uid": manifest["series_instance_uid"],
-                "num_slices": manifest["num_slices"],
-                "manifest": str(Path(args.out) / MANIFEST_NAME),
-            },
-            sort_keys=True,
-        )
-    )
+    print(json.dumps(summary, sort_keys=True))
     return 0
 
 

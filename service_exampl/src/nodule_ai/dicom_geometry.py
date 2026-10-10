@@ -31,6 +31,42 @@ _UID_PATTERN = re.compile(r"^[0-9]+(?:\.[0-9]+)*$")
 MAX_UID_LENGTH = 64
 
 
+def pixel_to_lps(
+    row: float,
+    column: float,
+    position_mm: Sequence[float],
+    orientation: Sequence[float],
+    pixel_spacing_mm: Sequence[float],
+) -> tuple[float, float, float]:
+    """Convert a pixel index to patient-space (DICOM LPS, mm).
+
+    ``column`` runs along the first ImageOrientationPatient vector with
+    PixelSpacing[1]; ``row`` runs along the second vector with PixelSpacing[0].
+    """
+    ipp = np.array([float(v) for v in position_mm], dtype=float)
+    iop = np.array([float(v) for v in orientation], dtype=float)
+    spacing = np.array([float(v) for v in pixel_spacing_mm], dtype=float)
+    lps = ipp + column * spacing[1] * iop[:3] + row * spacing[0] * iop[3:]
+    return (float(lps[0]), float(lps[1]), float(lps[2]))
+
+
+def mean_contour_center_lps(
+    contour_rows_columns: Sequence[Sequence[Sequence[float]]],
+    contour_positions_mm: Sequence[Sequence[float]],
+    orientation: Sequence[float],
+    pixel_spacing_mm: Sequence[float],
+) -> tuple[float, float, float]:
+    """Mean LPS position of every contour point across all supplied slices."""
+    points = []
+    for rows_columns, position in zip(contour_rows_columns, contour_positions_mm):
+        for point in rows_columns:
+            points.append(pixel_to_lps(point[0], point[1], position, orientation, pixel_spacing_mm))
+    if not points:
+        raise DataError("cannot compute a centre from an empty contour set")
+    mean = np.mean(np.array(points, dtype=float), axis=0)
+    return (float(mean[0]), float(mean[1]), float(mean[2]))
+
+
 def validate_uid(value: object, name: str) -> str:
     """Return a syntactically valid DICOM UID (<=64 chars) or raise DataError."""
     if not isinstance(value, str) or not value:
