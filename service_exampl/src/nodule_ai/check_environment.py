@@ -223,6 +223,17 @@ def _verify_device(device: str) -> None:
         raise CheckError("device_unavailable", f"requested device {device} does not exist")
 
 
+def _engine_stub():
+    """Minimal engine proxy for MONAI's CheckpointLoader.
+
+    MONAI's handler reads ``state.max_epochs`` and, when it is not ``None``,
+    ``state.epoch``; both must exist for the load to complete.
+    """
+    # max_epochs=None keeps MONAI's handler from comparing against an epoch
+    # count; epoch exists in case a future handler reads it unconditionally.
+    return SimpleNamespace(state=SimpleNamespace(max_epochs=None, epoch=0))
+
+
 def _load_checkpoint(bundle_dir: Path, device: str) -> tuple[float, dict]:
     """Initialise the bundle network and load the trained checkpoint strictly."""
     import torch
@@ -244,10 +255,9 @@ def _load_checkpoint(bundle_dir: Path, device: str) -> tuple[float, dict]:
         raise CheckError("model_load_failed", f"cannot initialise the bundle network: {exc}") from exc
     # Explicit device; never the bundle's auto-device fallback.
     loader.map_location = device
-    stub = SimpleNamespace(state=SimpleNamespace(max_epochs=0))
     started = time.perf_counter()
     try:
-        loader(stub)
+        loader(_engine_stub())
     except Exception as exc:
         raise CheckError("model_load_failed", f"checkpoint load failed: {exc}") from exc
     elapsed = time.perf_counter() - started

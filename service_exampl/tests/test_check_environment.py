@@ -204,6 +204,19 @@ class CliEvidenceTests(unittest.TestCase):
                 self.assertIn(name, evidence["packages"])
 
     @unittest.skipUnless(HAS_TORCH, "requires the AI environment (torch/monai)")
+    def test_engine_stub_satisfies_real_checkpoint_loader(self):
+        import torch
+        from monai.handlers.checkpoint_loader import CheckpointLoader
+
+        model = torch.nn.Linear(2, 1)
+        with tempfile.TemporaryDirectory() as tmp:
+            checkpoint = Path(tmp) / "tiny.pt"
+            torch.save(model.state_dict(), checkpoint)
+            loader = CheckpointLoader(load_path=str(checkpoint), load_dict={"model": model})
+            # MONAI's handler reads engine.state.max_epochs (and epoch when it is not None).
+            loader(check_environment._engine_stub())
+
+    @unittest.skipUnless(HAS_TORCH, "requires the AI environment (torch/monai)")
     def test_explicit_cuda_unavailable_fails_without_cpu_fallback(self):
         import torch
 
