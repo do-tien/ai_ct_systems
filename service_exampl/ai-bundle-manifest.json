@@ -1,0 +1,162 @@
+{
+  "bundle_name": "lung_nodule_ct_detection",
+  "bundle_version": "0.6.11",
+  "data_license": "LUNA16 (CC BY 4.0); LIDC-IDRI (CC BY 3.0) - see docs/data_license.txt",
+  "files": [
+    {
+      "algorithm": "sha256",
+      "digest": "cbf810d5038f01a0a6541081c534c42863754322209be703a928d28c9563682e",
+      "path": "configs/evaluate.json",
+      "size": 1624,
+      "source": "https://raw.githubusercontent.com/Project-MONAI/model-zoo/4f676176dc0c16771a3a5e252a565e72a1eaa666/models/lung_nodule_ct_detection/configs/evaluate.json"
+    },
+    {
+      "algorithm": "sha256",
+      "digest": "d8e69c1ac4fa419181d0af3a03d5a6aef7f8f4cb1e46cfecbc4dc6879090cda3",
+      "path": "configs/inference.json",
+      "size": 6991,
+      "source": "https://raw.githubusercontent.com/Project-MONAI/model-zoo/4f676176dc0c16771a3a5e252a565e72a1eaa666/models/lung_nodule_ct_detection/configs/inference.json"
+    },
+    {
+      "algorithm": "sha256",
+      "digest": "0783b243ef66f06a20ca9d9563d8a6aac4840594f4c69bbfddd0a14dc9cbca82",
+      "path": "configs/inference_trt.json",
+      "size": 332,
+      "source": "https://raw.githubusercontent.com/Project-MONAI/model-zoo/4f676176dc0c16771a3a5e252a565e72a1eaa666/models/lung_nodule_ct_detection/configs/inference_trt.json"
+    },
+    {
+      "algorithm": "sha256",
+      "digest": "f6e88ab39700a754dc09ae95be68d9fa2663611f0e5437b99c6d4afee4e81a0d",
+      "path": "configs/logging.conf",
+      "size": 322,
+      "source": "https://raw.githubusercontent.com/Project-MONAI/model-zoo/4f676176dc0c16771a3a5e252a565e72a1eaa666/models/lung_nodule_ct_detection/configs/logging.conf"
+    },
+    {
+      "algorithm": "sha256",
+      "digest": "153abaa4f89b917eb8db9b31eede9ddae74b6fd9dcdafe92a5c4779be316a352",
+      "path": "configs/metadata.json",
+      "size": 4546,
+      "source": "https://raw.githubusercontent.com/Project-MONAI/model-zoo/4f676176dc0c16771a3a5e252a565e72a1eaa666/models/lung_nodule_ct_detection/configs/metadata.json"
+    },
+    {
+      "algorithm": "sha256",
+      "digest": "e7675a34a2ee7d5653e04d94e8c6931afb72d2fa39a85b80f6182c193839a8a2",
+      "path": "configs/train.json",
+      "size": 14282,
+      "source": "https://raw.githubusercontent.com/Project-MONAI/model-zoo/4f676176dc0c16771a3a5e252a565e72a1eaa666/models/lung_nodule_ct_detection/configs/train.json"
+    },
+    {
+      "algorithm": "sha256",
+      "digest": "4b841ee56f244d13db9b9a8eea2fc3823ef86775ded9e7a371012465181412ef",
+      "path": "docs/data_license.txt",
+      "size": 467,
+      "source": "https://raw.githubusercontent.com/Project-MONAI/model-zoo/4f676176dc0c16771a3a5e252a565e72a1eaa666/models/lung_nodule_ct_detection/docs/data_license.txt"
+    },
+    {
+      "algorithm": "sha256",
+      "digest": "3f4473cf68095a522450d9af2d39f95cae985d877737440fbe9c84bc40d4464b",
+      "path": "docs/README.md",
+      "size": 11640,
+      "source": "https://raw.githubusercontent.com/Project-MONAI/model-zoo/4f676176dc0c16771a3a5e252a565e72a1eaa666/models/lung_nodule_ct_detection/docs/README.md"
+    },
+    {
+      "algorithm": "sha256",
+      "digest": "813052e7570064c95b4a9b793166282f78253f6e13034338d5840c68f206878a",
+      "path": "large_files.yml",
+      "size": 437,
+      "source": "https://raw.githubusercontent.com/Project-MONAI/model-zoo/4f676176dc0c16771a3a5e252a565e72a1eaa666/models/lung_nodule_ct_detection/large_files.yml"
+    },
+    {
+      "algorithm": "sha256",
+      "digest": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+      "path": "LICENSE",
+      "size": 11357,
+      "source": "https://raw.githubusercontent.com/Project-MONAI/model-zoo/4f676176dc0c16771a3a5e252a565e72a1eaa666/models/lung_nodule_ct_detection/LICENSE"
+    },
+    {
+      "algorithm": "sha256",
+      "digest": "b5e79231466adae93a6fe8e8594029e9add142914e223b879aa0343bb2402d01",
+      "expected_upstream": {
+        "algorithm": "md5",
+        "declared_in": "models/lung_nodule_ct_detection/large_files.yml",
+        "digest": "b2e732a7c2786e2f8398fa45293b1e73"
+      },
+      "path": "models/model.pt",
+      "size": 83709381,
+      "source": "https://developer.download.nvidia.com/assets/Clara/monai/tutorials/model_zoo/model_lung_nodule_ct_detection.pt"
+    },
+    {
+      "algorithm": "sha256",
+      "digest": "0ba4210e123c4fa26feefded9d8ed35e6656992901fae0df13a4dc3823e3ef73",
+      "path": "scripts/__init__.py",
+      "size": 804,
+      "source": "https://raw.githubusercontent.com/Project-MONAI/model-zoo/4f676176dc0c16771a3a5e252a565e72a1eaa666/models/lung_nodule_ct_detection/scripts/__init__.py"
+    },
+    {
+      "algorithm": "sha256",
+      "digest": "5421c31aba25e057bcd5d375fb692042727ad9eed161f92e71f33c3c22da3e27",
+      "path": "scripts/cocometric_ignite.py",
+      "size": 4899,
+      "source": "https://raw.githubusercontent.com/Project-MONAI/model-zoo/4f676176dc0c16771a3a5e252a565e72a1eaa666/models/lung_nodule_ct_detection/scripts/cocometric_ignite.py"
+    },
+    {
+      "algorithm": "sha256",
+      "digest": "8256c5f6de40a780f3d84cde489a8c929e0b04785009cc4e8acf90d4c90db22e",
+      "path": "scripts/detection_inferer.py",
+      "size": 3110,
+      "source": "https://raw.githubusercontent.com/Project-MONAI/model-zoo/4f676176dc0c16771a3a5e252a565e72a1eaa666/models/lung_nodule_ct_detection/scripts/detection_inferer.py"
+    },
+    {
+      "algorithm": "sha256",
+      "digest": "1cac369ec5da38f0458dad7ec97781df12d69f3284be7e97afcea99577fbbb8c",
+      "path": "scripts/detection_saver.py",
+      "size": 6050,
+      "source": "https://raw.githubusercontent.com/Project-MONAI/model-zoo/4f676176dc0c16771a3a5e252a565e72a1eaa666/models/lung_nodule_ct_detection/scripts/detection_saver.py"
+    },
+    {
+      "algorithm": "sha256",
+      "digest": "8662f6e71d7d6a9b250f582961b7a58c2d48ec1fff9816bc443cb166da26c66f",
+      "path": "scripts/evaluator.py",
+      "size": 8891,
+      "source": "https://raw.githubusercontent.com/Project-MONAI/model-zoo/4f676176dc0c16771a3a5e252a565e72a1eaa666/models/lung_nodule_ct_detection/scripts/evaluator.py"
+    },
+    {
+      "algorithm": "sha256",
+      "digest": "bc7aa6b2cae668651b38a8af68ac504e6cc47b3a08f0fc49e355c3e3bae7665e",
+      "path": "scripts/trainer.py",
+      "size": 11521,
+      "source": "https://raw.githubusercontent.com/Project-MONAI/model-zoo/4f676176dc0c16771a3a5e252a565e72a1eaa666/models/lung_nodule_ct_detection/scripts/trainer.py"
+    },
+    {
+      "algorithm": "sha256",
+      "digest": "07642cebc67a84570e206348989073ffe6369975d33e4672d4ad9a4e857dc788",
+      "path": "scripts/utils.py",
+      "size": 650,
+      "source": "https://raw.githubusercontent.com/Project-MONAI/model-zoo/4f676176dc0c16771a3a5e252a565e72a1eaa666/models/lung_nodule_ct_detection/scripts/utils.py"
+    },
+    {
+      "algorithm": "sha256",
+      "digest": "bc3cd2a464932956337eb810ddec59d324cad9a51f66345787204c6cb541d67a",
+      "path": "scripts/warmup_scheduler.py",
+      "size": 3982,
+      "source": "https://raw.githubusercontent.com/Project-MONAI/model-zoo/4f676176dc0c16771a3a5e252a565e72a1eaa666/models/lung_nodule_ct_detection/scripts/warmup_scheduler.py"
+    }
+  ],
+  "intended_use": "This is an example, not to be used for diagnostic purposes",
+  "license": "Apache-2.0",
+  "metadata": {
+    "monai_version": "1.4.0",
+    "numpy_version": "1.24.4",
+    "pytorch_version": "2.4.0",
+    "required_packages_version": {
+      "nibabel": "5.2.1",
+      "pytorch-ignite": "0.4.11",
+      "tensorboard": "2.17.0",
+      "torchvision": "0.19.0"
+    }
+  },
+  "schema_version": "1",
+  "source_index_base": "https://raw.githubusercontent.com/Project-MONAI/model-zoo/4f676176dc0c16771a3a5e252a565e72a1eaa666/",
+  "source_repository": "https://github.com/Project-MONAI/model-zoo",
+  "source_revision": "4f676176dc0c16771a3a5e252a565e72a1eaa666"
+}
