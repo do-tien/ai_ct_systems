@@ -299,8 +299,8 @@ def select_case(client, scans, annotations_dir: Path) -> dict:
                 "collection_doi": str(row["source_DOI"]),
                 "license": str(row["license_short_name"]),
                 "idc_version": client.get_idc_version(),
-                "idc_index_version": importlib.metadata.version("idc-index"),
-                "idc_index_data_version": importlib.metadata.version("idc-index-data"),
+                "idc_index_version": _distribution_version("idc-index"),
+                "idc_index_data_version": _distribution_version("idc-index-data"),
             },
             "study_instance_uid": scan.study_instance_uid,
             "series_instance_uid": scan.series_instance_uid,
@@ -329,6 +329,18 @@ def _sha256(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _distribution_version(name: str) -> str | None:
+    """Version of an installed distribution, or None when it is absent.
+
+    Provenance must stay reportable in environments that do not install the
+    optional data distributions (e.g. the geometry-only environment).
+    """
+    try:
+        return importlib.metadata.version(name)
+    except importlib.metadata.PackageNotFoundError:
+        return None
 
 
 def _slice_lookup(series_metadata: dict) -> dict:
@@ -449,7 +461,7 @@ def build_reference(selection: dict, series_metadata: dict, scan, session_ids: d
         "idc_version": selection["source"].get("idc_version"),
         "idc_index_version": selection["source"].get("idc_index_version"),
         "idc_index_data_version": selection["source"].get("idc_index_data_version"),
-        "pylidc_version": importlib.metadata.version("pylidc"),
+        "pylidc_version": _distribution_version("pylidc"),
         "pylidc_sqlite_sha256": _pylidc_sqlite_hash(),
         "annotations_artifact": selection.get("artifacts", {}).get("annotations"),
         "dependency_lock_sha256": _dependency_lock_hash(),

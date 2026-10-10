@@ -35,5 +35,14 @@ ai = [
     "SimpleITK==2.4.0",
 ]
 
+# Native geometry/volume tooling (LC1-04): SimpleITK decode + nibabel NIfTI.
+# Exact resolved set and wheel hashes live in requirements-geometry.txt.
+geometry = [
+    "pydicom==2.4.4",
+    "SimpleITK==2.4.0",
+    "nibabel==5.2.1",
+    "numpy>=1.23.5,<2",
+]
+
 [tool.setuptools.packages.find]
 where = ["src"]

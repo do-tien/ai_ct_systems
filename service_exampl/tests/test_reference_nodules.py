@@ -7,6 +7,7 @@ serialisation contracts, not real CT coordinates.
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import math
 import tempfile
@@ -276,6 +277,10 @@ def _eligible_cluster(ids, session_ids, diameters, reference_id="nodule-abc"):
     }
 
 
+HAS_PANDAS = importlib.util.find_spec("pandas") is not None
+
+
+@unittest.skipUnless(HAS_PANDAS, "requires the data environment (pandas for the IDC index stand-in)")
 class SelectCaseTests(unittest.TestCase):
     def _client(self, instance_count=2):
         return FakeIDC(

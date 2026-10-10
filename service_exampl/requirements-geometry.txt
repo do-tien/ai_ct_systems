@@ -1,0 +1,11 @@
+# LC1-04 native geometry/volume lock (Windows x64, CPython 3.11).
+# SimpleITK decodes DICOM pixels; nibabel reads/writes the temporary NIfTI.
+# NumPy is fixed at the version this lock was installed and smoke-tested with.
+# Install with: python -m pip install --require-hashes -r requirements-geometry.txt
+# Evidence: docs/lc1-04-volume-coordinates.md.
+
+nibabel==5.2.1 --hash=sha256:2cbbc22985f7f9d39d050df47249771dfb8d48447f5e7a993177e4cabfe047f0   # https://files.pythonhosted.org/packages/77/3f/ce43b8c2ccc4a7913a87c4d425aaf0080ea3abf947587e47dc2025981a17/nibabel-5.2.1-py3-none-any.whl
+numpy==1.23.5 --hash=sha256:0cbe9848fad08baf71de1a39e12d1b6310f1d5b2d0ea4de051058e6e1076852d   # https://files.pythonhosted.org/packages/19/0d/b8c34e4baf258d77a8592bdce45183e9a12874c167f5966c7dd467b74ea9/numpy-1.23.5-cp311-cp311-win_amd64.whl
+packaging==26.3 --hash=sha256:d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c   # https://files.pythonhosted.org/packages/63/34/ba1c580383c9eada3711951fef0795c80b829a078d72188184bcab9dd527/packaging-26.3-py3-none-any.whl
+pydicom==2.4.4 --hash=sha256:f9f8e19b78525be57aa6384484298833e4d06ac1d6226c79459131ddb0bd7c42   # https://files.pythonhosted.org/packages/35/2a/8c0f6fe243e6b6793868c6834203a44cc8f3f25abad780e1c7b21e15594d/pydicom-2.4.4-py3-none-any.whl
+SimpleITK==2.4.0 --hash=sha256:f9681520793a36b229f1f177790264ab7503180a6ea9c38b2c1d219d40f87994   # https://files.pythonhosted.org/packages/58/ff/6526142fe44a3d9a2f4725fc8d446acc0044f672148b15a5c984351ae1ef/SimpleITK-2.4.0-cp311-abi3-win_amd64.whl
