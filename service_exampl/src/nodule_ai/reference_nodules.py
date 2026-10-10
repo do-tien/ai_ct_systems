@@ -248,6 +248,7 @@ def select_case(client, scans, annotations_dir: Path) -> dict:
                 tol=scan.pixel_spacing,
                 factor=0.9,
                 min_tol=0.1,
+                verbose=False,
             )
         except DataError:
             continue
