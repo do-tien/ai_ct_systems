@@ -19,5 +19,21 @@ data = [
     "pydicom==2.4.4",
 ]
 
+# Native AI runtime (LC1-03). torch/torchvision must come from the official CPU
+# index (download.pytorch.org/whl/cpu); the exact resolved set, flavour and wheel
+# hashes are frozen in requirements-ai-cpu.txt — install from that lock.
+# torch 2.4.1 (not the bundle metadata pin 2.4.0): the 2.4.0 Windows cpu wheel
+# hard-imports libomp140.x86_64.dll, which no VC++ redistributable provides.
+ai = [
+    "monai==1.4.0",
+    "torch==2.4.1",
+    "torchvision==0.19.1",
+    "numpy==1.24.4",
+    "nibabel==5.2.1",
+    "pytorch-ignite==0.4.11",
+    "tensorboard==2.17.0",
+    "SimpleITK==2.4.0",
+]
+
 [tool.setuptools.packages.find]
 where = ["src"]
