@@ -495,5 +495,76 @@ class ReferenceTests(unittest.TestCase):
             self.assertEqual(unrelated.read_bytes(), b"keep me")
 
 
+class CliStaleOutputTests(unittest.TestCase):
+    def test_reference_cli_removes_stale_output_before_failing(self):
+        from nodule_ai import reference_nodules
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            out = root / "reference.json"
+            out.write_text("stale reference", encoding="utf-8")
+            selection_path = root / "selection.json"
+            selection_doc([_eligible_cluster([1, 2, 3], ["s", "t", "u"], [12.0, 10.0, 8.0])])
+            selection_path.write_text(
+                json.dumps(selection_doc([_eligible_cluster([1, 2, 3], ["s", "t", "u"], [12.0, 10.0, 8.0])])),
+                encoding="utf-8",
+            )
+            series_dir = root / "series"
+            series_dir.mkdir()
+
+            code = reference_nodules.main(
+                [
+                    "--series-dir",
+                    str(series_dir),
+                    "--selection",
+                    str(selection_path),
+                    "--annotations-dir",
+                    str(root / "annotations"),
+                    "--out",
+                    str(out),
+                ]
+            )
+            self.assertEqual(code, 2)
+            self.assertFalse(out.exists())
+
+    def test_reference_cli_reports_invalid_selection_as_data_error(self):
+        from nodule_ai import reference_nodules
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            selection = selection_doc([_eligible_cluster([1, 2, 3], ["s", "t", "u"], [12.0, 10.0, 8.0])])
+            del selection["series_instance_uid"]
+            selection_path = root / "selection.json"
+            selection_path.write_text(json.dumps(selection), encoding="utf-8")
+
+            code = reference_nodules.main(
+                [
+                    "--series-dir",
+                    str(root),
+                    "--selection",
+                    str(selection_path),
+                    "--annotations-dir",
+                    str(root),
+                    "--out",
+                    str(root / "reference.json"),
+                ]
+            )
+            self.assertEqual(code, 2)
+
+
+class ReferenceGuardTests(unittest.TestCase):
+    def test_build_reference_requires_an_eligible_cluster(self):
+        selection, scan, session_ids, roi_bindings = ReferenceTests()._fixture()
+        selection["clusters"] = []
+        with self.assertRaises(DataError):
+            build_reference(selection, series_metadata(), scan, session_ids, roi_bindings)
+
+    def test_build_reference_requires_target_in_clusters(self):
+        selection, scan, session_ids, roi_bindings = ReferenceTests()._fixture()
+        selection["target_reference_id"] = "nodule-missing"
+        with self.assertRaises(DataError):
+            build_reference(selection, series_metadata(), scan, session_ids, roi_bindings)
+
+
 if __name__ == "__main__":
     unittest.main()

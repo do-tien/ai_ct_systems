@@ -250,6 +250,24 @@ class FetchCaseTests(unittest.TestCase):
             with self.assertRaises(DataError):
                 fetch_case(selection, out, client=FakeIDCClient(self._builder))
 
+    def test_failed_fetch_removes_stale_manifest(self):
+        from nodule_ai.fetch_case import MANIFEST_NAME, main
+
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            (out / MANIFEST_NAME).write_text('{"stale": true}', encoding="utf-8")
+            # Pre-seeded cache with unusable content: no network, validation fails.
+            cache = out / "dicom" / SERIES_A
+            cache.mkdir(parents=True)
+            (cache / "junk.dcm").write_bytes(b"not a dicom")
+
+            selection_path = out / "selection.json"
+            selection_path.write_text(json.dumps(selection_for(expected_instance_count=3)), encoding="utf-8")
+
+            code = main(["--selection", str(selection_path), "--out", str(out)])
+            self.assertEqual(code, 2)
+            self.assertFalse((out / MANIFEST_NAME).exists())
+
 
 if __name__ == "__main__":
     unittest.main()

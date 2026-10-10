@@ -184,6 +184,12 @@ def fetch_case(selection: dict, out_dir: Path, *, client=None, dir_template: str
     """
     validate_selection(selection)
     out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    # A failed run must never leave a prior success manifest that a consumer
+    # could mistake for this run's result.
+    manifest_path = out_dir / MANIFEST_NAME
+    if manifest_path.exists():
+        manifest_path.unlink()
     dicom_root = out_dir / DICOM_DIRNAME
     series_uid = selection["series_instance_uid"]
     series_dir = dicom_root / dir_template.replace("%SeriesInstanceUID", series_uid)

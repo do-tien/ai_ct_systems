@@ -354,6 +354,11 @@ def build_reference(selection: dict, series_metadata: dict, scan, session_ids: d
     for key in _UIDS:
         if selection[key] != series_metadata[key]:
             raise DataError(f"selection {key} does not match the series metadata")
+    if not selection.get("clusters"):
+        raise DataError("selection has no eligible cluster to export")
+    cluster_ids = [cluster.get("id") for cluster in selection["clusters"]]
+    if selection.get("target_reference_id") not in cluster_ids:
+        raise DataError("selection target_reference_id is not one of the eligible clusters")
     orientation = series_metadata["image_orientation_patient"]
     spacing = series_metadata["pixel_spacing_mm"]
     slice_lookup = _slice_lookup(series_metadata)
@@ -559,6 +564,13 @@ def _load_selection(path: Path) -> dict:
     return load(path)
 
 
+def validate_selection(selection: dict) -> dict:
+    """Re-export the shared selection contract check (fetched lazily, no import cycle)."""
+    from .fetch_case import validate_selection as validate
+
+    return validate(selection)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="nodule_ai.reference_nodules",
@@ -570,8 +582,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out", required=True, type=Path, help="reference.json output path")
     args = parser.parse_args(argv)
 
+    # Remove any prior generated reference before any validation can fail, so a
+    # failed run never leaves a stale file that looks like this run's result.
+    if args.out.exists():
+        args.out.unlink()
+
     try:
         selection = _load_selection(args.selection)
+        validate_selection(selection)
         series_metadata = read_series_metadata(args.series_dir)
         index = build_annotation_index(args.annotations_dir)
         xml_path = index.get((selection["study_instance_uid"], selection["series_instance_uid"]))
