@@ -191,9 +191,9 @@ def _vector(ds, keyword: str, length: int) -> list[float]:
 def _single(values: list[str], name: str, code: str) -> str:
     unique = set(values)
     if len(unique) != 1:
-        if len(unique) > 1 and all(value for value in unique):
-            raise _geometry(f"{name} is not unique across the series: {sorted(unique)}", "UID_MISMATCH")
-        raise _geometry(f"{name} is missing or not unique across the series: {sorted(unique)}", code)
+        # Differing non-empty values keep the caller's field-specific code; UID
+        # fields pass "UID_MISMATCH" explicitly.
+        raise _geometry(f"{name} differs across the series: {sorted(unique)}", code)
     return unique.pop()
 
 
@@ -234,10 +234,10 @@ def read_series_metadata(series_dir: Path) -> dict:
         if frames is not None and int(frames) != 1:
             raise _geometry(f"multi-frame DICOM is not supported (NumberOfFrames={frames})", "UNSUPPORTED_CT")
 
-    study_uid = validate_uid(_single([str(ds.get("StudyInstanceUID", "")) for ds in datasets], "StudyInstanceUID", "INVALID_UID"), "StudyInstanceUID")
-    series_uid = validate_uid(_single([str(ds.get("SeriesInstanceUID", "")) for ds in datasets], "SeriesInstanceUID", "INVALID_UID"), "SeriesInstanceUID")
+    study_uid = validate_uid(_single([str(ds.get("StudyInstanceUID", "")) for ds in datasets], "StudyInstanceUID", "UID_MISMATCH"), "StudyInstanceUID")
+    series_uid = validate_uid(_single([str(ds.get("SeriesInstanceUID", "")) for ds in datasets], "SeriesInstanceUID", "UID_MISMATCH"), "SeriesInstanceUID")
     frame_uid = validate_uid(
-        _single([str(ds.get("FrameOfReferenceUID", "")) for ds in datasets], "FrameOfReferenceUID", "INVALID_UID"),
+        _single([str(ds.get("FrameOfReferenceUID", "")) for ds in datasets], "FrameOfReferenceUID", "UID_MISMATCH"),
         "FrameOfReferenceUID",
     )
 

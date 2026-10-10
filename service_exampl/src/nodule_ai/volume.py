@@ -80,7 +80,7 @@ def _expected_direction(metadata: dict) -> np.ndarray:
     return matrix
 
 
-def _itk_affine(image: sitk.Image) -> np.ndarray:
+def itk_affine(image: sitk.Image) -> np.ndarray:
     affine = np.eye(4)
     # ITK keeps direction (unit) and spacing apart; the index transform is
     # origin + direction @ diag(spacing) @ index.
@@ -177,7 +177,7 @@ def write_nifti(
     out.parent.mkdir(parents=True, exist_ok=True)
     array = sitk.GetArrayFromImage(image)  # (z, y, x)
     data = np.transpose(array, (2, 1, 0))  # nibabel is (x, y, z)
-    affine_ras = lps_to_ras_affine(_itk_affine(image))
+    affine_ras = lps_to_ras_affine(itk_affine(image))
 
     created = False
     try:

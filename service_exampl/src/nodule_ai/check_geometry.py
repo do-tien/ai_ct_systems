@@ -150,18 +150,19 @@ def run_geometry(series_dir: Path, reference_path: Path, manifest_path: Path, *,
             "recovered_lps": [float(v) for v in recovered],
             "error_mm": error,
         }
-        if raw_error is None:
-            # Independent in-plane oracle on the landmark's own slice: compare the
-            # raw-tag LPS with the affine applied at the same (integer) slice.
-            slice_index = int(round(index[2]))
-            slice_path = metadata["ordered_files"][min(max(slice_index, 0), len(metadata["ordered_files"]) - 1)]
-            raw = _raw_tag_lps(metadata, slice_path, index[1], index[0])
-            oracle_point = np.array(voxel_to_world((index[0], index[1], float(slice_index)), affine_lps))
-            raw_error = float(np.linalg.norm(np.array(raw) - oracle_point))
-            landmark_entry["raw_tag_lps"] = [float(v) for v in raw]
-            landmark_entry["raw_tag_error_mm"] = raw_error
-            if raw_error > RAW_TAG_TOL_MM:
-                raise _error(f"raw-tag oracle disagrees by {raw_error} mm", "GEOMETRY_MISMATCH")
+        # Independent in-plane oracle on the landmark's own slice: compare the
+        # raw-tag LPS with the affine applied at the same (integer) slice. Every
+        # landmark is checked, not only the first.
+        slice_index = int(round(index[2]))
+        slice_path = metadata["ordered_files"][min(max(slice_index, 0), len(metadata["ordered_files"]) - 1)]
+        raw = _raw_tag_lps(metadata, slice_path, index[1], index[0])
+        oracle_point = np.array(voxel_to_world((index[0], index[1], float(slice_index)), affine_lps))
+        landmark_error = float(np.linalg.norm(np.array(raw) - oracle_point))
+        landmark_entry["raw_tag_lps"] = [float(v) for v in raw]
+        landmark_entry["raw_tag_error_mm"] = landmark_error
+        if landmark_error > RAW_TAG_TOL_MM:
+            raise _error(f"raw-tag oracle disagrees by {landmark_error} mm", "GEOMETRY_MISMATCH")
+        raw_error = landmark_error if raw_error is None else max(raw_error, landmark_error)
         landmarks.append(landmark_entry)
 
     nifti_report = {"written": False}

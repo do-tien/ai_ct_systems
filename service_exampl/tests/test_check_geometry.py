@@ -78,7 +78,8 @@ class GeometryCliTests(unittest.TestCase):
             self.assertEqual(len(evidence["landmarks"]), 2)
             for landmark in evidence["landmarks"]:
                 self.assertLessEqual(landmark["error_mm"], 1e-3)
-            self.assertLessEqual(evidence["landmarks"][0]["raw_tag_error_mm"], 1e-4)
+                # Every landmark is checked against the independent raw-tag oracle.
+                self.assertLessEqual(landmark["raw_tag_error_mm"], 1e-4)
             self.assertEqual(evidence["bundle_transform"]["status"], "not_run")
             self.assertTrue(evidence["nifti"]["written"])
             self.assertFalse(evidence["nifti"]["persisted"])

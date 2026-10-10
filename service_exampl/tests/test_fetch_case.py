@@ -352,6 +352,23 @@ class GeometryErrorCodeTests(unittest.TestCase):
             write_series(directory, z_positions=[0.0, 1.0], number_of_frames=4)
             self.assertEqual(self._code(directory), "UNSUPPORTED_CT")
 
+    def test_mixed_non_uid_headers_keep_their_field_code(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            paths = write_series(directory, z_positions=[0.0, 1.0])
+            ds = pydicom.dcmread(paths[1])
+            ds.Rows = ds.Rows + 1
+            ds.save_as(paths[1], write_like_original=False)
+            self.assertEqual(self._code(directory), "INVALID_GEOMETRY")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            paths = write_series(directory, z_positions=[0.0, 1.0])
+            ds = pydicom.dcmread(paths[1])
+            ds.Modality = "MR"
+            ds.save_as(paths[1], write_like_original=False)
+            self.assertEqual(self._code(directory), "NOT_CT")
+
     def test_ordered_files_track_sop_order(self):
         with tempfile.TemporaryDirectory() as tmp:
             directory = Path(tmp)
