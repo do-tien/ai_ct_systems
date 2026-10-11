@@ -1,0 +1,11 @@
+version: "2"
+sql:
+  - engine: "postgresql"
+    schema: "migrations"
+    queries: "internal/infrastructure/postgres/queries"
+    gen:
+      go:
+        package: "lc1db"
+        out: "internal/infrastructure/postgres/lc1db"
+        sql_package: "pgx/v5"
+        emit_empty_slices: true

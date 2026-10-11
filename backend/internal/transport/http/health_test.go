@@ -28,7 +28,12 @@ type healthBody struct {
 }
 
 func doHealthRequest(postgresErr, orthancErr error) (int, http.Header, string) {
-	handler := NewRouter(health.NewService(stubProbe{err: postgresErr}, stubProbe{err: orthancErr}))
+	handler := NewRouter(
+		health.NewService(stubProbe{err: postgresErr}, stubProbe{err: orthancErr}),
+		nil,                    // unused initial-read dependency for health tests
+		nil,                    // unused final-read dependency for health tests
+		http.NotFoundHandler(), // unused DICOMweb dependency for health tests
+	)
 	recorder := httptest.NewRecorder()
 	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/healthz", nil))
 	return recorder.Code, recorder.Header(), recorder.Body.String()

@@ -18,6 +18,9 @@ type Client struct {
 	baseURL    string
 	user       string
 	password   string
+	// archiveLimit caps one series archive download; zero means the default
+	// maxArchiveBytes. Set by NewArchiveClient.
+	archiveLimit int64
 }
 
 // NewClient builds a client from injected dependencies. The base URL is
