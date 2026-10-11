@@ -1,3 +1,10 @@
+# OPTIONAL, SECONDARY PACKAGING PATH — NOT native acceptance (LC1-18).
+# STATUS: incomplete / DEFERRED. The `backend` image is Go-only (backend/Dockerfile
+# has no Python interpreter or AI dependencies) and the `backend` service sets no
+# AI_PYTHON / AI_BUNDLE_DIR / AI_JOB_DIR / AI_DEVICE, so this Compose file cannot
+# run the LC1-12 AI worker. Do NOT present `up --wait` as full-runtime proof.
+# The native runbook is docs/lc1-18-native-runtime.md; Docker evidence is tracked
+# separately in docs/lc1-18-runtime-verification.md and is currently DEFERRED.
 name: nodule-reader
 
 services:

@@ -5,6 +5,9 @@
   "DicomServerEnabled": false,
   "DicomWeb": {
     "Enable": true,
-    "Root": "/dicom-web/"
+    "Root": "/dicom-web/",
+    "PublicRoot": "/dicom-web/",
+    "StudiesMetadata": "Full",
+    "SeriesMetadata": "Full"
   }
 }
