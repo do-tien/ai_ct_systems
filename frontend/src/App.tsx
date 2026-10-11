@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
+import CasePage from './CasePage.tsx'
+
 type CheckName = 'backend' | 'postgres' | 'orthanc'
 type RowState = 'loading' | 'ok' | 'unavailable' | 'unknown'
 
@@ -20,6 +22,17 @@ const ROW_TEXT: Record<RowState, string> = {
 
 const REQUEST_TIMEOUT_MS = 5000
 const INVALID_RESPONSE_MESSAGE = 'Không kết nối được backend hoặc phản hồi không hợp lệ'
+
+// Only a positive decimal case id opens the viewer; anything else keeps the
+// health page and never sends a malformed case request.
+function parseCaseId(search: string): number | null {
+  const value = new URLSearchParams(search).get('case')
+  if (value === null || !/^[1-9][0-9]*$/.test(value)) {
+    return null
+  }
+  const id = Number(value)
+  return Number.isSafeInteger(id) ? id : null
+}
 
 function filledRows(state: RowState): Record<CheckName, RowState> {
   return { backend: state, postgres: state, orthanc: state }
@@ -51,6 +64,7 @@ function parseHealth(payload: unknown): Record<CheckName, RowState> | null {
 }
 
 export default function App() {
+  const caseId = parseCaseId(window.location.search)
   const [rows, setRows] = useState<Record<CheckName, RowState>>(() => filledRows('loading'))
   const [error, setError] = useState<string | null>(null)
   const [pending, setPending] = useState(true)
@@ -121,8 +135,18 @@ export default function App() {
     <main className="page">
       <header className="page-header">
         <h1>Nodule Reader — môi trường phát triển</h1>
-        <p className="notice">Chưa triển khai viewer CT và AI inference</p>
+        <p className="notice">
+          Công cụ nghiên cứu: xem ảnh CT trục của một ca đã nhập, không hiển thị gợi ý AI và không dùng để chẩn đoán.
+        </p>
       </header>
+
+      {caseId === null ? (
+        <p className="notice">
+          Mở một ca đã nhập bằng địa chỉ <code>/?case=&lt;id&gt;</code>, ví dụ <code>/?case=1</code>.
+        </p>
+      ) : (
+        <CasePage caseId={caseId} />
+      )}
 
       <section className="panel" aria-labelledby="status-heading">
         <h2 id="status-heading">Kiểm tra kết nối</h2>

@@ -9,7 +9,31 @@ export default defineConfig({
   plugins: [react()],
   server: {
     proxy: {
-      '/healthz': backendUrl,
+      // Same-origin routing to the Go backend. Paths and queries are forwarded
+      // unchanged (no rewrite) and changeOrigin stays false so the backend
+      // sees the browser's public authority, not Vite's.
+      '/healthz': { target: backendUrl, changeOrigin: false },
+      '/api': { target: backendUrl, changeOrigin: false },
+      '/dicom-web': { target: backendUrl, changeOrigin: false },
     },
+  },
+  worker: {
+    // The DICOM image loader spawns its decoder through
+    // `new Worker(new URL('./decodeImageFrameWorker.js', import.meta.url))`,
+    // so the emitted worker must stay an ES module.
+    format: 'es',
+  },
+  optimizeDeps: {
+    // Prebundling the loader would rewrite its worker URL and WASM asset
+    // resolution; keep it transformable and optimize the CommonJS deps it
+    // pulls in, which the browser cannot consume as raw ESM.
+    exclude: ['@cornerstonejs/dicom-image-loader'],
+    include: [
+      'dicom-parser',
+      '@cornerstonejs/codec-libjpeg-turbo-8bit/decodewasmjs',
+      '@cornerstonejs/codec-charls/decodewasmjs',
+      '@cornerstonejs/codec-openjpeg/decodewasmjs',
+      '@cornerstonejs/codec-openjph/wasmjs',
+    ],
   },
 })

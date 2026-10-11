@@ -11,7 +11,7 @@ body {
 }
 
 .page {
-  max-width: 40rem;
+  max-width: 60rem;
   margin: 0 auto;
   padding: 1.5rem 1rem 3rem;
 }
@@ -101,6 +101,253 @@ button:focus-visible {
   border-radius: 4px;
 }
 
+.viewer {
+  margin-bottom: 1.5rem;
+}
+
+.viewer-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.viewer-toolbar button {
+  padding: 0.35rem 0.75rem;
+}
+
+.viewer-toolbar button:not(.active) {
+  background: #ffffff;
+  color: #1d4ed8;
+}
+
+.viewer-toolbar button.active {
+  background: #0f2f8f;
+  border-color: #0f2f8f;
+}
+
+.viewer-spacer {
+  flex: 1 1 auto;
+}
+
+.viewer-counter {
+  min-width: 5rem;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.viewer-stage {
+  position: relative;
+  overflow: hidden;
+  border-radius: 8px;
+  background: #000000;
+}
+
+.viewer-canvas {
+  width: 100%;
+  height: min(70vh, 640px);
+}
+
+.viewer-canvas canvas {
+  display: block;
+}
+
+.viewer-labels {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  color: #7dd3fc;
+  font-weight: 700;
+  font-size: 0.95rem;
+}
+
+.viewer-label {
+  position: absolute;
+}
+
+.viewer-label-top {
+  top: 6px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.viewer-label-bottom {
+  bottom: 6px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.viewer-label-left {
+  left: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.viewer-label-right {
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.viewer-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  padding: 1rem;
+  color: #e5e7eb;
+  text-align: center;
+}
+
+.viewer-overlay-error {
+  color: #fecaca;
+}
+
+.viewer-timing {
+  margin: 0.5rem 0 0;
+  color: #4b5563;
+  font-size: 0.9rem;
+}
+
+.mark-empty {
+  margin: 0.5rem 0 0.75rem;
+  color: #4b5563;
+}
+
+.mark-list {
+  list-style: none;
+  margin: 0.5rem 0 0.75rem;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.mark-row {
+  display: flex;
+  align-items: stretch;
+  gap: 0.5rem;
+}
+
+.mark-focus {
+  flex: 1 1 auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem;
+  text-align: left;
+  background: #f8fafc;
+  color: inherit;
+  border-color: #d1d5db;
+}
+
+.mark-index {
+  font-weight: 600;
+}
+
+.mark-diameter {
+  font-variant-numeric: tabular-nums;
+}
+
+.mark-note {
+  color: #4b5563;
+  font-style: italic;
+}
+
+.mark-delete {
+  white-space: nowrap;
+}
+
+.submit-bar {
+  margin-top: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.submit-status {
+  margin: 0;
+  font-weight: 600;
+}
+
+.submit-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.submit-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.submit-confirm p {
+  margin: 0;
+}
+
+.mark-origin {
+  color: #6b7280;
+  font-size: 0.85rem;
+}
+
+.ai-provenance {
+  font-size: 0.9rem;
+  color: #4b5563;
+}
+
+.candidate-list {
+  margin: 0.5rem 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.candidate-row {
+  border: 1px solid var(--border, #d1d5db);
+  border-radius: 6px;
+  padding: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.candidate-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.candidate-decision {
+  font-weight: 600;
+}
+
+.candidate-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.candidate-dismiss {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.candidate-dismiss label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
 @media (prefers-color-scheme: dark) {
   body {
     background: #14161a;
@@ -140,5 +387,34 @@ button:focus-visible {
   .status-loading,
   .status-unknown {
     color: #9ca3af;
+  }
+
+  .viewer-toolbar button:not(.active) {
+    background: #1d2025;
+    color: #93c5fd;
+  }
+
+  .viewer-timing {
+    color: #9ca3af;
+  }
+
+  .mark-focus {
+    background: #262b33;
+    border-color: #3a414b;
+    color: #e6e8eb;
+  }
+
+  .mark-note,
+  .mark-empty {
+    color: #9ca3af;
+  }
+
+  .mark-origin,
+  .ai-provenance {
+    color: #9ca3af;
+  }
+
+  .candidate-row {
+    border-color: #333941;
   }
 }
