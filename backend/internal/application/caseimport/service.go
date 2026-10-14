@@ -9,11 +9,7 @@ import (
 	"context"
 	"errors"
 	"io"
-	"io/fs"
 	"os"
-	"path/filepath"
-	"sort"
-	"strings"
 	"sync"
 	"time"
 )
@@ -63,14 +59,6 @@ func (e *ReasonError) Error() string { return e.reason }
 
 // Unwrap exposes the category sentinel to errors.Is.
 func (e *ReasonError) Unwrap() error { return e.sentinel }
-
-// Request is one import invocation.
-type Request struct {
-	// Dir is the directory holding exactly the DICOM files of one series.
-	Dir string
-	// Source is the non-identifying label stored on the case.
-	Source string
-}
 
 // Result reports the committed case and how many instances were imported.
 // Existing is true when the series was already imported and no new case was
@@ -425,120 +413,6 @@ func expired(state *sessionState, now time.Time) bool {
 	return !state.expiresAt.After(now)
 }
 
-// ValidateSourceLabel trims and validates the non-identifying source label.
-func ValidateSourceLabel(label string) (string, error) {
-	trimmed := strings.TrimSpace(label)
-	if trimmed == "" {
-		return "", Fail(ErrInvalidInput, "source label is empty")
-	}
-	if len(trimmed) > 64 {
-		return "", Fail(ErrInvalidInput, "source label is longer than 64 characters")
-	}
-	for _, r := range trimmed {
-		valid := (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
-			(r >= '0' && r <= '9') || r == '-' || r == '_' || r == '.'
-		if !valid {
-			return "", Fail(ErrInvalidInput, "source label contains unsupported characters")
-		}
-	}
-	return trimmed, nil
-}
-
-// Import runs the whole import. The caller's context is preserved across every
-// upload, metadata request and the persistence call.
-func (s *Service) Import(ctx context.Context, request Request) (Result, error) {
-	source, err := ValidateSourceLabel(request.Source)
-	if err != nil {
-		return Result{}, err
-	}
-	if ctx.Err() != nil {
-		return Result{}, Fail(ErrCanceled, "import canceled before start")
-	}
-
-	files, err := inventoryFiles(request.Dir)
-	if err != nil {
-		return Result{}, err
-	}
-
-	uploaded := make([]UploadedInstance, 0, len(files))
-	seen := make(map[string]struct{}, len(files))
-	for _, file := range files {
-		if ctx.Err() != nil {
-			return Result{}, Fail(ErrCanceled, "import canceled during upload")
-		}
-		handle, err := openUnchanged(file)
-		if err != nil {
-			return Result{}, err
-		}
-		instance, uploadErr := s.archive.Upload(ctx, handle, file.size)
-		closeErr := handle.Close()
-		if uploadErr != nil {
-			return Result{}, uploadErr
-		}
-		if closeErr != nil {
-			return Result{}, Fail(ErrDependency, "cannot close an input file")
-		}
-		if _, duplicate := seen[instance.ID]; duplicate {
-			return Result{}, Fail(ErrInvalidInput, "orthanc returned a duplicate instance identifier")
-		}
-		seen[instance.ID] = struct{}{}
-		uploaded = append(uploaded, instance)
-	}
-
-	seriesID, studyID, err := commonParent(uploaded)
-	if err != nil {
-		return Result{}, err
-	}
-
-	metadata, err := s.archive.DescribeSeries(ctx, seriesID)
-	if err != nil {
-		return Result{}, err
-	}
-	if metadata.SeriesID != seriesID || metadata.StudyID != studyID {
-		return Result{}, Fail(ErrUnsuitableSeries, "series metadata does not match the uploaded parents")
-	}
-
-	imported, err := ValidateSeries(metadata, uploaded)
-	if err != nil {
-		return Result{}, err
-	}
-	imported.Source = source
-
-	inventory, err := s.archive.ListSeriesInstances(ctx, seriesID)
-	if err != nil {
-		return Result{}, err
-	}
-	if !sameInstanceSet(inventory, seen) {
-		return Result{}, Fail(ErrDependency, "series inventory changed during import")
-	}
-
-	if ctx.Err() != nil {
-		return Result{}, Fail(ErrCanceled, "import canceled before persistence")
-	}
-	caseID, err := s.store.CreateImportedCase(ctx, imported)
-	if err != nil {
-		return Result{}, err
-	}
-	return Result{CaseID: caseID, InstanceCount: imported.InstanceCount}, nil
-}
-
-// commonParent returns the shared parent identifiers of every accepted upload.
-func commonParent(uploaded []UploadedInstance) (string, string, error) {
-	if len(uploaded) == 0 {
-		return "", "", Fail(ErrInvalidInput, "no instances were uploaded")
-	}
-	seriesID, studyID := uploaded[0].SeriesID, uploaded[0].StudyID
-	if seriesID == "" || studyID == "" {
-		return "", "", Fail(ErrInvalidInput, "upload reply lacks a parent identifier")
-	}
-	for _, instance := range uploaded[1:] {
-		if instance.SeriesID != seriesID || instance.StudyID != studyID {
-			return "", "", Fail(ErrInvalidInput, "uploads span multiple series or studies")
-		}
-	}
-	return seriesID, studyID, nil
-}
-
 func sameInstanceSet(inventory []string, seen map[string]struct{}) bool {
 	if len(inventory) != len(seen) {
 		return false
@@ -549,85 +423,4 @@ func sameInstanceSet(inventory []string, seen map[string]struct{}) bool {
 		}
 	}
 	return true
-}
-
-// inputFile is one inventoried file: its path and the size observed at
-// inventory time.
-type inputFile struct {
-	path string
-	size int64
-}
-
-// inventoryFiles walks dir recursively and returns every regular, non-empty
-// file in deterministic lexical order. Symlinks and other non-regular entries
-// are rejected rather than skipped.
-func inventoryFiles(dir string) ([]inputFile, error) {
-	info, err := os.Stat(dir)
-	if err != nil {
-		return nil, Fail(ErrInvalidInput, "input directory is not accessible")
-	}
-	if !info.IsDir() {
-		return nil, Fail(ErrInvalidInput, "input path is not a directory")
-	}
-
-	var files []inputFile
-	walkErr := filepath.WalkDir(dir, func(path string, entry fs.DirEntry, err error) error {
-		if err != nil {
-			return Fail(ErrInvalidInput, "input directory cannot be traversed")
-		}
-		if entry.IsDir() {
-			return nil
-		}
-		if !entry.Type().IsRegular() {
-			return Fail(ErrInvalidInput, "input directory contains a non-regular entry")
-		}
-		entryInfo, err := entry.Info()
-		if err != nil {
-			return Fail(ErrInvalidInput, "input file cannot be inspected")
-		}
-		if entryInfo.Size() == 0 {
-			return Fail(ErrInvalidInput, "input file is empty")
-		}
-		files = append(files, inputFile{path: path, size: entryInfo.Size()})
-		return nil
-	})
-	if walkErr != nil {
-		return nil, walkErr
-	}
-	if len(files) < 2 {
-		return nil, Fail(ErrInvalidInput, "at least two DICOM files are required")
-	}
-	sort.Slice(files, func(i, j int) bool {
-		return filepath.ToSlash(files[i].path) < filepath.ToSlash(files[j].path)
-	})
-	return files, nil
-}
-
-// openUnchanged opens an inventoried file after confirming it is still the same
-// regular, non-empty file that was inventoried.
-func openUnchanged(file inputFile) (*os.File, error) {
-	before, err := os.Lstat(file.path)
-	if err != nil {
-		return nil, Fail(ErrInvalidInput, "input file disappeared")
-	}
-	if !before.Mode().IsRegular() {
-		return nil, Fail(ErrInvalidInput, "input entry is no longer a regular file")
-	}
-	if before.Size() != file.size {
-		return nil, Fail(ErrInvalidInput, "input file changed size during import")
-	}
-	handle, err := os.Open(file.path)
-	if err != nil {
-		return nil, Fail(ErrDependency, "cannot open an input file")
-	}
-	opened, err := handle.Stat()
-	if err != nil {
-		handle.Close()
-		return nil, Fail(ErrDependency, "cannot inspect an open input file")
-	}
-	if !opened.Mode().IsRegular() || opened.Size() != file.size {
-		handle.Close()
-		return nil, Fail(ErrInvalidInput, "input file changed during import")
-	}
-	return handle, nil
 }

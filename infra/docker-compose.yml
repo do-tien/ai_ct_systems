@@ -51,6 +51,9 @@ services:
       ORTHANC_URL: http://orthanc:8042
       ORTHANC_USER: ${ORTHANC_USER:?ORTHANC_USER is required (see .env.example)}
       ORTHANC_PASSWORD: ${ORTHANC_PASSWORD:?ORTHANC_PASSWORD is required (see .env.example)}
+      # Private staging root for the upload API. The container still lacks the
+      # required AI_* settings, so this path remains DEFERRED as documented above.
+      UPLOAD_DIR: /tmp/nodule-uploads
     ports:
       - "127.0.0.1:${BACKEND_PORT:-8080}:8080"
     depends_on:
