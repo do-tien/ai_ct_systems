@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -100,6 +101,26 @@ func (s *ImportStore) CreateImportedCase(ctx context.Context, input caseimport.I
 		return 0, caseimport.Fail(caseimport.ErrCommitOutcomeUnknown, "database commit outcome is unknown")
 	}
 	return created.ID, nil
+}
+
+// FindCaseBySeriesUID returns the case already created for a validated Series
+// Instance UID. It is the commit-reconciliation lookup: it never writes and
+// never reads reads, marks or AI state.
+func (s *ImportStore) FindCaseBySeriesUID(ctx context.Context, seriesInstanceUID string) (int64, bool, error) {
+	if seriesInstanceUID == "" {
+		return 0, false, caseimport.Fail(caseimport.ErrInvalidInput, "empty series instance UID")
+	}
+	row, err := lc1db.New(s.pool).GetCaseBySeriesUID(ctx, seriesInstanceUID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return 0, false, nil
+		}
+		if ctx.Err() != nil {
+			return 0, false, caseimport.Fail(caseimport.ErrCanceled, "case lookup canceled")
+		}
+		return 0, false, caseimport.Fail(caseimport.ErrDependency, "case lookup failed")
+	}
+	return row.ID, true, nil
 }
 
 // classifyWrite maps a failed statement to an application category without

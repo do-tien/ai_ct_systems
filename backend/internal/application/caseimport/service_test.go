@@ -38,10 +38,19 @@ type fakeArchive struct {
 	describeCall int
 	listCall     int
 	metadata     caseimport.SeriesMetadata
+	// results, when set, are returned by Upload in call order.
+	results []caseimport.UploadedInstance
+	// metadataBySeries, when set, is returned by DescribeSeries by series id.
+	metadataBySeries map[string]caseimport.SeriesMetadata
+	// uploadHook runs at the start of every Upload call.
+	uploadHook func(call int)
 }
 
 func (f *fakeArchive) Upload(ctx context.Context, body io.Reader, size int64) (caseimport.UploadedInstance, error) {
 	f.uploadCount++
+	if f.uploadHook != nil {
+		f.uploadHook(f.uploadCount)
+	}
 	raw, err := io.ReadAll(body)
 	if err != nil {
 		return caseimport.UploadedInstance{}, err
@@ -57,6 +66,9 @@ func (f *fakeArchive) Upload(ctx context.Context, body io.Reader, size int64) (c
 	if err := ctx.Err(); err != nil {
 		return caseimport.UploadedInstance{}, caseimport.Fail(caseimport.ErrCanceled, "scripted cancel")
 	}
+	if len(f.results) >= f.uploadCount {
+		return f.results[f.uploadCount-1], nil
+	}
 	return caseimport.UploadedInstance{
 		ID:       instanceIDAt(f.uploadCount - 1),
 		SeriesID: orthancSeriesID,
@@ -69,6 +81,12 @@ func (f *fakeArchive) DescribeSeries(ctx context.Context, seriesID string) (case
 	if f.describeFunc != nil {
 		return f.describeFunc()
 	}
+	if f.metadataBySeries != nil {
+		if meta, ok := f.metadataBySeries[seriesID]; ok {
+			return meta, nil
+		}
+		return caseimport.SeriesMetadata{}, caseimport.Fail(caseimport.ErrDependency, "unknown scripted series")
+	}
 	return f.metadata, nil
 }
 
@@ -77,8 +95,14 @@ func (f *fakeArchive) ListSeriesInstances(ctx context.Context, seriesID string) 
 	if f.listFunc != nil {
 		return f.listFunc()
 	}
-	ids := make([]string, 0, len(f.metadata.Instances))
-	for _, instance := range f.metadata.Instances {
+	source := f.metadata
+	if f.metadataBySeries != nil {
+		if meta, ok := f.metadataBySeries[seriesID]; ok {
+			source = meta
+		}
+	}
+	ids := make([]string, 0, len(source.Instances))
+	for _, instance := range source.Instances {
 		ids = append(ids, instance.ID)
 	}
 	return ids, nil
@@ -89,6 +113,22 @@ type fakeStore struct {
 	last    caseimport.ImportedCase
 	result  int64
 	failure error
+	// existing mirrors FindCaseBySeriesUID's answer.
+	existingID    int64
+	existingFound bool
+	lookupErr     error
+	lookups       int
+}
+
+func (f *fakeStore) FindCaseBySeriesUID(ctx context.Context, uid string) (int64, bool, error) {
+	f.lookups++
+	if f.lookupErr != nil {
+		return 0, false, f.lookupErr
+	}
+	if f.existingFound {
+		return f.existingID, true, nil
+	}
+	return 0, false, nil
 }
 
 func (f *fakeStore) CreateImportedCase(ctx context.Context, input caseimport.ImportedCase) (int64, error) {

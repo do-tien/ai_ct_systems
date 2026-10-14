@@ -8,6 +8,11 @@ SELECT id, source, study_instance_uid, series_instance_uid, orthanc_series_id, f
 FROM cases
 WHERE id = $1;
 
+-- name: GetCaseBySeriesUID :one
+SELECT id, source, study_instance_uid, series_instance_uid, orthanc_series_id, frame_of_reference_uid, status, finalized_at, created_at
+FROM cases
+WHERE series_instance_uid = $1;
+
 -- name: GetCaseForUpdate :one
 SELECT id, source, study_instance_uid, series_instance_uid, orthanc_series_id, frame_of_reference_uid, status, finalized_at, created_at
 FROM cases

@@ -63,10 +63,18 @@ func (c *Client) Upload(ctx context.Context, body io.Reader, size int64) (caseim
 	defer response.Body.Close()
 
 	// The status is decided before the body is read so a large error page from
-	// Orthanc stays a dependency failure instead of looking like bad input.
+	// Orthanc stays a dependency failure instead of looking like bad input. A
+	// 4xx rejection means Orthanc refused the bytes themselves, which is an
+	// invalid upload rather than an outage.
 	if response.StatusCode != http.StatusOK {
-		return caseimport.UploadedInstance{}, caseimport.Fail(caseimport.ErrDependency,
-			fmt.Sprintf("orthanc upload rejected with status %d", response.StatusCode))
+		switch response.StatusCode {
+		case http.StatusBadRequest, http.StatusUnsupportedMediaType, http.StatusUnprocessableEntity:
+			return caseimport.UploadedInstance{}, caseimport.Fail(caseimport.ErrInvalidInput,
+				"orthanc rejected the uploaded file as invalid DICOM")
+		default:
+			return caseimport.UploadedInstance{}, caseimport.Fail(caseimport.ErrDependency,
+				fmt.Sprintf("orthanc upload rejected with status %d", response.StatusCode))
+		}
 	}
 
 	raw, err := readBounded(response.Body, maxUploadResponseBytes)
