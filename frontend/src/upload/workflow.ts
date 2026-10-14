@@ -11,6 +11,12 @@ import type { UploadCaseResult, UploadSession, UploadState } from './types.ts'
 // token is stored; File objects are never claimed to be restored.
 export const UPLOAD_SESSION_KEY = 'nodule-reader.upload.session-id'
 
+// The server's own multipart budget (2 GiB including framing) and file ceiling,
+// mirrored so an impossible selection is refused before a long transfer starts.
+// The server stays authoritative: these only avoid a doomed upload.
+export const MAX_UPLOAD_BYTES = 2 * 1024 ** 3
+export const MAX_UPLOAD_FILES = 10_000
+
 export interface UploadStorage {
   get(key: string): string | null
   set(key: string, value: string): void
@@ -152,8 +158,18 @@ export function createUploadWorkflow(dependencies: UploadDependencies): UploadCo
       if (files.length === 0) {
         return
       }
-      const { token, signal } = begin()
       const totalBytes = files.reduce((sum, file) => sum + file.size, 0)
+      if (files.length > MAX_UPLOAD_FILES || totalBytes > MAX_UPLOAD_BYTES) {
+        publish({
+          ...emptyState(),
+          phase: 'failed',
+          fileCount: files.length,
+          totalBytes,
+          error: messageForCode('UPLOAD_TOO_LARGE'),
+        })
+        return
+      }
+      const { token, signal } = begin()
       publish({
         phase: 'uploading',
         fileCount: files.length,

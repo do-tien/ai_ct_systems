@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { setImmediate as tick } from 'node:timers/promises'
 
 import { UploadApiError } from '../src/upload/api.ts'
-import { createUploadWorkflow, UPLOAD_SESSION_KEY } from '../src/upload/workflow.ts'
+import { MAX_UPLOAD_BYTES, MAX_UPLOAD_FILES, createUploadWorkflow, UPLOAD_SESSION_KEY } from '../src/upload/workflow.ts'
 import type { UploadDependencies, UploadStorage, UploadTransferOptions } from '../src/upload/workflow.ts'
 import type { UploadCaseResult, UploadSession, UploadState } from '../src/upload/types.ts'
 
@@ -262,6 +262,20 @@ test('restore reloads a stored session and drops an expired one', async () => {
   await controller.restore()
   assert.equal(controller.getState().phase, 'idle')
   assert.equal(storage.values.has(UPLOAD_SESSION_KEY), false)
+})
+
+test('an oversized selection is refused before any transfer', async () => {
+  const harnessed = harness()
+  const controller = createUploadWorkflow(harnessed.dependencies)
+
+  await controller.start(files(2, MAX_UPLOAD_BYTES))
+  assert.equal(controller.getState().phase, 'failed')
+  assert.equal(harnessed.calls.upload, 0)
+  assert.match(controller.getState().error ?? '', /giới hạn/)
+
+  await controller.start(files(MAX_UPLOAD_FILES + 1, 1))
+  assert.equal(controller.getState().phase, 'failed')
+  assert.equal(harnessed.calls.upload, 0)
 })
 
 test('a disposed workflow ignores its late upload', async () => {
