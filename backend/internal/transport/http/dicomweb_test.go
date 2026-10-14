@@ -175,6 +175,7 @@ func TestDICOMwebRouterRegistration(t *testing.T) {
 				health.NewService(stubProbe{}, stubProbe{}),
 				nil, // unused initial-read dependency for DICOMweb tests
 				nil, // unused final-read dependency for DICOMweb tests
+				nil, // unused upload dependency for DICOMweb tests
 				NewDICOMwebHandler(terminal),
 			)
 			request := httptest.NewRequest(testCase.method, testCase.target, nil)

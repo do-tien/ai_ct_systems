@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"nodule-reader/backend/internal/application/aijob"
+	"nodule-reader/backend/internal/application/caseimport"
 	"nodule-reader/backend/internal/application/finalread"
 	"nodule-reader/backend/internal/application/health"
 	"nodule-reader/backend/internal/application/initialread"
@@ -62,6 +63,13 @@ func main() {
 	initialReadService := initialread.NewService(postgres.NewInitialReadStore(pool))
 	finalReadService := finalread.NewService(postgres.NewFinalReadStore(pool))
 
+	// Uploads use their own bounded Orthanc client: the two-second health probe
+	// and the long-lived image transport must not share a connection budget.
+	uploadService := caseimport.NewService(
+		orthanc.NewClient(orthanc.NewImportHTTPClient(), cfg.OrthancURL, cfg.OrthancUser, cfg.OrthancPassword),
+		postgres.NewImportStore(pool),
+	)
+
 	imageTransport := newImageTransport()
 	defer imageTransport.CloseIdleConnections()
 
@@ -74,8 +82,14 @@ func main() {
 	}
 
 	server := &http.Server{
-		Addr:              cfg.HTTPAddr,
-		Handler:           httpapi.NewRouter(healthService, initialReadService, finalReadService, httpapi.NewDICOMwebHandler(dicomwebProxy)),
+		Addr: cfg.HTTPAddr,
+		Handler: httpapi.NewRouter(
+			healthService,
+			initialReadService,
+			finalReadService,
+			httpapi.NewUploadHandler(uploadService, cfg.UploadDir),
+			httpapi.NewDICOMwebHandler(dicomwebProxy),
+		),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
