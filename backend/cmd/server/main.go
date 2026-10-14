@@ -94,9 +94,9 @@ func main() {
 	}
 
 	// The AI job worker starts outside the HTTP handlers and owns its own
-	// lifetime: a bounded startup snapshot of queued jobs is drained one at a
-	// time, so listening never waits on a database snapshot, an archive
-	// download or Python startup.
+	// lifetime: it scans the queue immediately, drains a bounded batch one job at
+	// a time and keeps scanning until shutdown, so a job committed by a later
+	// upload is picked up without restarting the server.
 	archiveClient := orthanc.NewArchiveClient(orthanc.NewArchiveHTTPClient(), cfg.OrthancURL, cfg.OrthancUser, cfg.OrthancPassword)
 	runner := python.NewRunner(python.Settings{
 		Python:    cfg.AIPython,

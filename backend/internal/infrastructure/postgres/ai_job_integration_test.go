@@ -125,8 +125,8 @@ func TestAIJobServiceRejectsInvalidGeometry(t *testing.T) {
 			service := aijob.NewService(store, aiJobRefusingArchive{t}, &aiJobStubRunner{
 				execution: aijob.Execution{ExitCode: 0, Result: result},
 			}, time.Second)
-			if err := service.Run(ctx); err != nil {
-				t.Fatalf("Run: %v", err)
+			if err := service.Drain(ctx); err != nil {
+				t.Fatalf("Drain: %v", err)
 			}
 
 			if after := snapshotClinical(t, pool); before != after {
