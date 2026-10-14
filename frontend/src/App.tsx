@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import CasePage from './CasePage.tsx'
+import UploadPanel from './UploadPanel.tsx'
 
 type CheckName = 'backend' | 'postgres' | 'orthanc'
 type RowState = 'loading' | 'ok' | 'unavailable' | 'unknown'
@@ -131,25 +132,36 @@ export default function App() {
     }
   }, [runCheck])
 
+  // A confirmed upload is opened with a full navigation to the existing deep
+  // link; no router is added.
+  const openCase = useCallback((id: number) => {
+    window.location.assign(`/?case=${id}`)
+  }, [])
+
   return (
     <main className="page">
       <header className="page-header">
-        <h1>Nodule Reader — môi trường phát triển</h1>
+        <h1>Nodule Reader — công cụ nghiên cứu</h1>
         <p className="notice">
-          Công cụ nghiên cứu: xem ảnh CT trục của một ca đã nhập, không hiển thị gợi ý AI và không dùng để chẩn đoán.
+          Công cụ nghiên cứu hỗ trợ đọc CT lồng ngực: bác sĩ đọc độc lập trước, sau đó xem xét các
+          điểm không đồng ý với gợi ý hỗ trợ và giữ quyết định cuối cùng. Không dùng để chẩn đoán.
         </p>
       </header>
 
       {caseId === null ? (
-        <p className="notice">
-          Mở một ca đã nhập bằng địa chỉ <code>/?case=&lt;id&gt;</code>, ví dụ <code>/?case=1</code>.
-        </p>
+        <>
+          <UploadPanel onOpenCase={openCase} />
+          <p className="notice">
+            Một ca đã nhập vẫn mở trực tiếp được bằng địa chỉ <code>/?case=&lt;id&gt;</code>, ví dụ{' '}
+            <code>/?case=1</code>.
+          </p>
+        </>
       ) : (
         <CasePage caseId={caseId} />
       )}
 
-      <section className="panel" aria-labelledby="status-heading">
-        <h2 id="status-heading">Kiểm tra kết nối</h2>
+      <details className="panel diagnostics">
+        <summary>Chẩn đoán kết nối</summary>
 
         <table className="status-table">
           <thead>
@@ -177,7 +189,7 @@ export default function App() {
             {error}
           </p>
         )}
-      </section>
+      </details>
     </main>
   )
 }
