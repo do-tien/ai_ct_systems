@@ -794,3 +794,127 @@ func TestLoginLimiterDoesNotEvictLiveLocks(t *testing.T) {
 		t.Fatalf("throttled error does not carry a positive retry-after: %v", err)
 	}
 }
+
+// boundedCredentials blocks every VerifyPIN call until gate closes and records
+// the peak number of concurrent calls.
+type boundedCredentials struct {
+	*fakeCredentials
+	started chan struct{}
+	gate    chan struct{}
+
+	mu      sync.Mutex
+	active  int
+	maxSeen int
+	calls   int
+}
+
+func newBoundedCredentials(goodPIN, hash string, capacity int) *boundedCredentials {
+	return &boundedCredentials{
+		fakeCredentials: newFakeCredentials(goodPIN, hash),
+		started:         make(chan struct{}, capacity),
+		gate:            make(chan struct{}),
+	}
+}
+
+func (b *boundedCredentials) VerifyPIN(pin, encoded string) (bool, error) {
+	b.mu.Lock()
+	b.calls++
+	b.active++
+	if b.active > b.maxSeen {
+		b.maxSeen = b.active
+	}
+	b.mu.Unlock()
+
+	b.started <- struct{}{}
+	<-b.gate
+
+	b.mu.Lock()
+	b.active--
+	b.mu.Unlock()
+	return b.fakeCredentials.verify(pin, encoded)
+}
+
+func (b *boundedCredentials) peakConcurrency() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.maxSeen
+}
+
+func (b *boundedCredentials) verificationCalls() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.calls
+}
+
+func TestLoginBoundsConcurrentVerifications(t *testing.T) {
+	const workers = maxConcurrentVerifications * 3
+	credentials := newBoundedCredentials("12345678", "hash:12345678", workers)
+	store := newFakeStore()
+	store.seed(1, "Alice", "12345678", "hash:12345678", credentials)
+	service := NewService(store, credentials)
+
+	var wait sync.WaitGroup
+	errs := make(chan error, workers)
+	for range workers {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			_, _, err := service.Login(context.Background(), "12345678", "10.0.0.1", testNow)
+			errs <- err
+		}()
+	}
+
+	for started := 0; started < maxConcurrentVerifications; started++ {
+		select {
+		case <-credentials.started:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("only %d verifications started", started)
+		}
+	}
+	select {
+	case <-credentials.started:
+		t.Fatal("a verification started beyond the concurrency bound")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	close(credentials.gate)
+	wait.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("login: %v", err)
+		}
+	}
+	if peak := credentials.peakConcurrency(); peak != maxConcurrentVerifications {
+		t.Fatalf("peak concurrent verifications = %d, want %d", peak, maxConcurrentVerifications)
+	}
+	if calls := credentials.verificationCalls(); calls != workers {
+		t.Fatalf("verification calls = %d, want %d", calls, workers)
+	}
+}
+
+func TestLoginCanceledVerificationWaiterDoesNotVerify(t *testing.T) {
+	store := newFakeStore()
+	credentials := newFakeCredentials("12345678", "hash:12345678")
+	store.seed(1, "Alice", "12345678", "hash:12345678", credentials)
+	service := NewService(store, credentials)
+	for range maxConcurrentVerifications {
+		service.verifySlots <- struct{}{}
+	}
+	t.Cleanup(func() {
+		for range maxConcurrentVerifications {
+			<-service.verifySlots
+		}
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	for _, pin := range []string{"12345678", "00000000"} {
+		if _, _, err := service.Login(ctx, pin, "10.0.0.2", testNow); !errors.Is(err, ErrDependency) {
+			t.Fatalf("pin %q error = %v, want ErrDependency", pin, err)
+		}
+	}
+	if calls := credentials.verifyCalls; calls != 0 {
+		t.Fatalf("VerifyPIN called %d times for a canceled waiter", calls)
+	}
+}

@@ -21,6 +21,11 @@ const (
 	maxNameRunes    = 100
 	pinAttempts     = 10
 	defaultMaxLimit = 4096
+
+	// maxConcurrentVerifications bounds the number of Argon2id verifications in
+	// flight per process. Argon2id is deliberately memory-hard, so an unbounded
+	// login burst could exhaust memory; the semaphore queues the rest.
+	maxConcurrentVerifications = 8
 )
 
 // dummyPINVerifier is a structurally valid Argon2id verifier with fixed salt and
@@ -37,6 +42,7 @@ type Service struct {
 	store       Store
 	credentials Credentials
 	limiter     *loginLimiter
+	verifySlots chan struct{}
 }
 
 // NewService builds the use case from its persistence port and credential
@@ -46,12 +52,31 @@ func NewService(store Store, credentials Credentials) *Service {
 		store:       store,
 		credentials: credentials,
 		limiter:     newLoginLimiter(defaultMaxLimit),
+		verifySlots: make(chan struct{}, maxConcurrentVerifications),
 	}
+}
+
+// acquireVerification reserves a verification slot, waiting only as long as
+// ctx allows. A canceled or expired context never starts a verification.
+func (s *Service) acquireVerification(ctx context.Context) error {
+	select {
+	case s.verifySlots <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ErrDependency
+	}
+}
+
+// releaseVerification returns a slot reserved by acquireVerification.
+func (s *Service) releaseVerification() {
+	<-s.verifySlots
 }
 
 // Login exchanges a PIN for a new opaque session token. Missing, disabled and
 // wrong PINs all return ErrInvalidCredentials; key-level throttling returns a
-// ThrottledError carrying the remaining lock time.
+// ThrottledError carrying the remaining lock time. Verifications are bounded by
+// a per-process semaphore, so a request whose context is canceled while waiting
+// returns ErrDependency without starting one.
 func (s *Service) Login(ctx context.Context, pin, clientIP string, now time.Time) (string, Session, error) {
 	lookup := s.credentials.PINLookup(pin)
 	key := limiterKey(clientIP, lookup)
@@ -63,15 +88,22 @@ func (s *Service) Login(ctx context.Context, pin, clientIP string, now time.Time
 	switch {
 	case errors.Is(err, ErrUserNotFound):
 		// Pay the same Argon2id cost as a real verification before failing.
-		_, _ = s.credentials.VerifyPIN(pin, dummyPINVerifier)
-		s.limiter.recordFailure(key, now)
-		return "", Session{}, ErrInvalidCredentials
+		encoded = dummyPINVerifier
 	case err != nil:
 		return "", Session{}, ErrDependency
 	}
 
-	valid, err := s.credentials.VerifyPIN(pin, encoded)
-	if err != nil || !valid {
+	if err := s.acquireVerification(ctx); err != nil {
+		return "", Session{}, err
+	}
+	valid, verifyErr := s.credentials.VerifyPIN(pin, encoded)
+	s.releaseVerification()
+
+	if errors.Is(err, ErrUserNotFound) {
+		s.limiter.recordFailure(key, now)
+		return "", Session{}, ErrInvalidCredentials
+	}
+	if verifyErr != nil || !valid {
 		s.limiter.recordFailure(key, now)
 		return "", Session{}, ErrInvalidCredentials
 	}
