@@ -38,13 +38,18 @@ type storageHarness struct {
 	admin       *pgx.Conn
 }
 
-func randomHex(t *testing.T, size int) string {
+func randomBytes(t *testing.T, size int) []byte {
 	t.Helper()
 	buf := make([]byte, size)
 	if _, err := rand.Read(buf); err != nil {
 		t.Fatalf("random: %v", err)
 	}
-	return hex.EncodeToString(buf)
+	return buf
+}
+
+func randomHex(t *testing.T, size int) string {
+	t.Helper()
+	return hex.EncodeToString(randomBytes(t, size))
 }
 
 func loopback(host string) bool {
@@ -158,8 +163,9 @@ func (h *storageHarness) migrate(t *testing.T) {
 }
 
 // grantRuntime applies the runtime privilege boundary the deployment docs
-// describe: no schema CREATE, mutable access only on the five mutable tables,
-// INSERT/SELECT only on events, and no owner membership.
+// describe: no schema CREATE, mutable access only on the clinical tables,
+// authentication reads/inserts only where the runtime needs them, and no owner
+// membership.
 func (h *storageHarness) grantRuntime(t *testing.T) {
 	t.Helper()
 	owner := h.owner(t)
@@ -169,6 +175,8 @@ func (h *storageHarness) grantRuntime(t *testing.T) {
 		`REVOKE CREATE ON SCHEMA public FROM PUBLIC`,
 		fmt.Sprintf(`GRANT USAGE ON SCHEMA public TO %q`, role),
 		fmt.Sprintf(`GRANT SELECT, INSERT, UPDATE, DELETE ON cases, reads, marks, ai_jobs, candidate_decisions TO %q`, role),
+		fmt.Sprintf(`GRANT SELECT, INSERT, UPDATE ON users TO %q`, role),
+		fmt.Sprintf(`GRANT SELECT, INSERT, DELETE ON auth_sessions TO %q`, role),
 		fmt.Sprintf(`GRANT SELECT, INSERT ON events TO %q`, role),
 		fmt.Sprintf(`GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO %q`, role),
 		fmt.Sprintf(`GRANT EXECUTE ON FUNCTION lc1_finite_triple(double precision[]) TO %q`, role),
@@ -194,6 +202,20 @@ func assertSQLState(t *testing.T, err error, code, label string) {
 	}
 }
 
+// seedUser inserts one active user with a synthetic (non-real) lookup value and
+// returns its id. Tests never use credential material.
+func seedUser(t *testing.T, tx pgx.Tx, name string) int64 {
+	t.Helper()
+	var id int64
+	err := tx.QueryRow(context.Background(),
+		`INSERT INTO users (display_name, pin_lookup, pin_hash)
+		 VALUES ($1, decode($2, 'hex'), 'synthetic') RETURNING id`, name, randomHex(t, 32)).Scan(&id)
+	if err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+	return id
+}
+
 // seedCaseRead inserts one case and one initial read and returns their ids.
 func seedCaseRead(t *testing.T, tx pgx.Tx, seriesUID string) (int64, int64) {
 	t.Helper()
@@ -205,9 +227,10 @@ func seedCaseRead(t *testing.T, tx pgx.Tx, seriesUID string) (int64, int64) {
 	if err != nil {
 		t.Fatalf("seed case: %v", err)
 	}
+	readerID := seedUser(t, tx, "dr-synthetic")
 	var readID int64
 	err = tx.QueryRow(ctx,
-		`INSERT INTO reads (case_id, kind, reader) VALUES ($1, 'initial', 'dr-synthetic') RETURNING id`, caseID).Scan(&readID)
+		`INSERT INTO reads (case_id, kind, reader_user_id) VALUES ($1, 'initial', $2) RETURNING id`, caseID, readerID).Scan(&readID)
 	if err != nil {
 		t.Fatalf("seed read: %v", err)
 	}
@@ -407,7 +430,8 @@ func TestLC1StorageConstraints(t *testing.T) {
 		sp.Rollback(ctx)
 
 		sp, _ = tx.Begin(ctx)
-		_, err = sp.Exec(ctx, `INSERT INTO reads (case_id, kind, reader) VALUES ($1, 'draft', 'dr-synthetic')`, caseID)
+		_, err = sp.Exec(ctx, `INSERT INTO reads (case_id, kind, reader_user_id)
+			SELECT $1, 'draft', reader_user_id FROM reads WHERE id = $2`, caseID, readID)
 		assertSQLState(t, err, "23514", "invalid read kind")
 		sp.Rollback(ctx)
 
@@ -494,12 +518,14 @@ func TestLC1StorageConstraints(t *testing.T) {
 
 		sp, _ = tx.Begin(ctx)
 		_, err = sp.Exec(ctx,
-			`INSERT INTO reads (case_id, kind, reader) SELECT case_id, 'initial', 'other' FROM reads WHERE id = $1`, readID)
+			`INSERT INTO reads (case_id, kind, reader_user_id)
+			 SELECT case_id, 'initial', reader_user_id FROM reads WHERE id = $1`, readID)
 		assertSQLState(t, err, "23505", "duplicate case/kind")
 		sp.Rollback(ctx)
 
 		sp, _ = tx.Begin(ctx)
-		_, err = sp.Exec(ctx, `INSERT INTO reads (case_id, kind, reader) VALUES (999999, 'initial', 'x')`)
+		_, err = sp.Exec(ctx, `INSERT INTO reads (case_id, kind, reader_user_id)
+			SELECT 999999, 'initial', reader_user_id FROM reads WHERE id = $1`, readID)
 		assertSQLState(t, err, "23503", "orphan read case")
 		sp.Rollback(ctx)
 

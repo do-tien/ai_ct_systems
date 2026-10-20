@@ -12,16 +12,17 @@ import (
 )
 
 const appendEvent = `-- name: AppendEvent :one
-INSERT INTO events (case_id, actor, action, detail)
-VALUES ($4, $1, $2, $3)
-RETURNING id, case_id, actor, action, detail, at
+INSERT INTO events (case_id, actor, action, detail, actor_user_id)
+VALUES ($4, $1, $2, $3, $5)
+RETURNING id, case_id, actor, action, detail, at, actor_user_id
 `
 
 type AppendEventParams struct {
-	Actor  string
-	Action string
-	Detail []byte
-	CaseID pgtype.Int8
+	Actor       string
+	Action      string
+	Detail      []byte
+	CaseID      pgtype.Int8
+	ActorUserID pgtype.Int8
 }
 
 func (q *Queries) AppendEvent(ctx context.Context, arg AppendEventParams) (Event, error) {
@@ -30,6 +31,7 @@ func (q *Queries) AppendEvent(ctx context.Context, arg AppendEventParams) (Event
 		arg.Action,
 		arg.Detail,
 		arg.CaseID,
+		arg.ActorUserID,
 	)
 	var i Event
 	err := row.Scan(
@@ -39,12 +41,13 @@ func (q *Queries) AppendEvent(ctx context.Context, arg AppendEventParams) (Event
 		&i.Action,
 		&i.Detail,
 		&i.At,
+		&i.ActorUserID,
 	)
 	return i, err
 }
 
 const listEvents = `-- name: ListEvents :many
-SELECT id, case_id, actor, action, detail, at
+SELECT id, case_id, actor, action, detail, at, actor_user_id
 FROM events
 WHERE case_id = $1
 ORDER BY id
@@ -66,6 +69,7 @@ func (q *Queries) ListEvents(ctx context.Context, caseID pgtype.Int8) ([]Event, 
 			&i.Action,
 			&i.Detail,
 			&i.At,
+			&i.ActorUserID,
 		); err != nil {
 			return nil, err
 		}

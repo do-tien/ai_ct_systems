@@ -48,6 +48,7 @@ func TestLC1StoragePrivileges(t *testing.T) {
 	})
 
 	caseRow := createCase(t, oq, "1.2.3.4.40")
+	createUser(t, oq, "dr-synthetic")
 	initialRead := createRead(t, oq, caseRow.ID, "initial")
 	createMark(t, oq, initialRead.ID, "reader", "", "seed")
 

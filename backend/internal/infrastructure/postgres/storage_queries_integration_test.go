@@ -28,11 +28,29 @@ func createCase(t *testing.T, q *lc1db.Queries, seriesUID string) lc1db.Case {
 	return row
 }
 
-func createRead(t *testing.T, q *lc1db.Queries, caseID int64, kind string) lc1db.Read {
+// createUser inserts one user through the generated query so tests exercise the
+// committed projection. The lookup value is synthetic and never a real PIN.
+func createUser(t *testing.T, q *lc1db.Queries, name string) lc1db.CreateUserRow {
 	t.Helper()
-	row, err := q.CreateRead(context.Background(), lc1db.CreateReadParams{CaseID: caseID, Kind: kind, Reader: "dr-synthetic"})
+	row, err := q.CreateUser(context.Background(), lc1db.CreateUserParams{
+		DisplayName: name,
+		PinLookup:   randomBytes(t, 32),
+		PinHash:     "$argon2id$v=19$synthetic",
+	})
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	return row
+}
+
+func createRead(t *testing.T, q *lc1db.Queries, caseID int64, kind string) lc1db.CreateReadRow {
+	t.Helper()
+	row, err := q.CreateRead(context.Background(), lc1db.CreateReadParams{CaseID: caseID, Kind: kind, DisplayName: "dr-synthetic"})
 	if err != nil {
 		t.Fatalf("CreateRead: %v", err)
+	}
+	if row.Reader != "dr-synthetic" || row.ReaderUserID <= 0 {
+		t.Fatalf("CreateRead projection = %+v, want joined owner", row)
 	}
 	return row
 }
@@ -66,6 +84,7 @@ func TestLC1StorageQueries(t *testing.T) {
 	h.migrate(t)
 	owner := h.owner(t)
 	ctx := context.Background()
+	readerUser := createUser(t, lc1db.New(owner), "dr-synthetic")
 
 	t.Run("rollback_persists_nothing", func(t *testing.T) {
 		tx, err := owner.Begin(ctx)
@@ -112,6 +131,13 @@ func TestLC1StorageQueries(t *testing.T) {
 		}
 		if got.SeriesInstanceUid != "1.2.3.4.21" || got.Status != "awaiting_read" {
 			t.Fatalf("case = %+v", got)
+		}
+		stored, err := q.GetRead(ctx, lc1db.GetReadParams{CaseID: row.ID, Kind: "initial"})
+		if err != nil {
+			t.Fatalf("GetRead: %v", err)
+		}
+		if stored.ReaderUserID != readerUser.ID || stored.Reader != readerUser.DisplayName {
+			t.Fatalf("stored read = %+v, want owner %d", stored, readerUser.ID)
 		}
 		marks, err := q.ListMarks(ctx, read.ID)
 		if err != nil {

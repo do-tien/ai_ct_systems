@@ -58,28 +58,32 @@ func (s *InitialReadStore) GetOrCreateInitial(ctx context.Context, caseID int64,
 		return initialread.Read{}, classifyInitialRead(ctx, err)
 	}
 
-	read, err := queries.GetReadForUpdate(ctx, lc1db.GetReadForUpdateParams{CaseID: caseID, Kind: initialread.KindInitial})
+	existing, err := queries.GetReadForUpdate(ctx, lc1db.GetReadForUpdateParams{CaseID: caseID, Kind: initialread.KindInitial})
+	var readID, readCaseID int64
+	var readKind, readReader string
+	var readLockedAt pgtype.Timestamptz
 	switch {
 	case err == nil:
 		// Existing read (locked or not) is returned unchanged.
+		readID, readCaseID, readKind, readReader, readLockedAt = existing.ID, existing.CaseID, existing.Kind, existing.Reader, existing.LockedAt
 	case errors.Is(err, pgx.ErrNoRows):
 		if caseRow.Status != statusAwaitingRead {
 			return initialread.Read{}, failInitial(initialread.ErrLocked, "case no longer accepts an initial read")
 		}
 		created, createErr := queries.CreateRead(ctx, lc1db.CreateReadParams{
-			CaseID: caseID,
-			Kind:   initialread.KindInitial,
-			Reader: reader,
+			CaseID:      caseID,
+			Kind:        initialread.KindInitial,
+			DisplayName: reader,
 		})
 		if createErr != nil {
 			return initialread.Read{}, classifyInitialRead(ctx, createErr)
 		}
-		read = created
+		readID, readCaseID, readKind, readReader, readLockedAt = created.ID, created.CaseID, created.Kind, created.Reader, created.LockedAt
 	default:
 		return initialread.Read{}, classifyInitialRead(ctx, err)
 	}
 
-	marks, err := listInitialMarks(ctx, queries, read.ID)
+	marks, err := listInitialMarks(ctx, queries, readID)
 	if err != nil {
 		return initialread.Read{}, classifyInitialRead(ctx, err)
 	}
@@ -87,7 +91,7 @@ func (s *InitialReadStore) GetOrCreateInitial(ctx context.Context, caseID int64,
 	if err := tx.Commit(ctx); err != nil {
 		return initialread.Read{}, commitFailure(ctx, err)
 	}
-	return toRead(read, marks), nil
+	return toRead(readID, readCaseID, readKind, readReader, readLockedAt, marks), nil
 }
 
 // ReplaceInitialMarks atomically replaces every mark of the initial read. The
@@ -109,34 +113,36 @@ func (s *InitialReadStore) ReplaceInitialMarks(ctx context.Context, caseID int64
 	}
 
 	read, err := queries.GetReadForUpdate(ctx, lc1db.GetReadForUpdateParams{CaseID: caseID, Kind: initialread.KindInitial})
+	var readID int64
 	switch {
 	case err == nil:
 		if caseRow.Status != statusAwaitingRead || read.LockedAt.Valid {
 			return nil, failInitial(initialread.ErrLocked, "initial read is locked")
 		}
+		readID = read.ID
 	case errors.Is(err, pgx.ErrNoRows):
 		if caseRow.Status != statusAwaitingRead {
 			return nil, failInitial(initialread.ErrLocked, "case no longer accepts an initial read")
 		}
 		created, createErr := queries.CreateRead(ctx, lc1db.CreateReadParams{
-			CaseID: caseID,
-			Kind:   initialread.KindInitial,
-			Reader: reader,
+			CaseID:      caseID,
+			Kind:        initialread.KindInitial,
+			DisplayName: reader,
 		})
 		if createErr != nil {
 			return nil, classifyInitialRead(ctx, createErr)
 		}
-		read = created
+		readID = created.ID
 	default:
 		return nil, classifyInitialRead(ctx, err)
 	}
 
-	if err := queries.DeleteMarks(ctx, read.ID); err != nil {
+	if err := queries.DeleteMarks(ctx, readID); err != nil {
 		return nil, classifyInitialRead(ctx, err)
 	}
 	for _, mark := range marks {
 		if _, err := queries.CreateMark(ctx, lc1db.CreateMarkParams{
-			ReadID:          read.ID,
+			ReadID:          readID,
 			P1Mm:            mark.P1MM,
 			P2Mm:            mark.P2MM,
 			CenterMm:        mark.CenterMM,
@@ -150,7 +156,7 @@ func (s *InitialReadStore) ReplaceInitialMarks(ctx context.Context, caseID int64
 		}
 	}
 
-	saved, err := listInitialMarks(ctx, queries, read.ID)
+	saved, err := listInitialMarks(ctx, queries, readID)
 	if err != nil {
 		return nil, classifyInitialRead(ctx, err)
 	}
@@ -211,9 +217,9 @@ func (s *InitialReadStore) SubmitInitial(ctx context.Context, caseID int64, read
 	}
 
 	final, err := queries.CreateRead(ctx, lc1db.CreateReadParams{
-		CaseID: caseID,
-		Kind:   initialread.KindFinal,
-		Reader: reader,
+		CaseID:      caseID,
+		Kind:        initialread.KindFinal,
+		DisplayName: reader,
 	})
 	if err != nil {
 		return initialread.SubmitResult{}, classifyInitialRead(ctx, err)
@@ -343,13 +349,13 @@ func toCase(row lc1db.Case) initialread.Case {
 	}
 }
 
-func toRead(row lc1db.Read, marks []initialread.Mark) initialread.Read {
+func toRead(id, caseID int64, kind, reader string, lockedAt pgtype.Timestamptz, marks []initialread.Mark) initialread.Read {
 	return initialread.Read{
-		ID:       row.ID,
-		CaseID:   row.CaseID,
-		Kind:     row.Kind,
-		Reader:   row.Reader,
-		LockedAt: timePointer(row.LockedAt),
+		ID:       id,
+		CaseID:   caseID,
+		Kind:     kind,
+		Reader:   reader,
+		LockedAt: timePointer(lockedAt),
 		Marks:    marks,
 	}
 }

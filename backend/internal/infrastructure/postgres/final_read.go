@@ -51,9 +51,9 @@ func (s *FinalReadStore) GetAI(ctx context.Context, caseID int64, reader string)
 	}
 	initial, err := queries.GetRead(ctx, lc1db.GetReadParams{CaseID: caseID, Kind: initialread.KindInitial})
 	if err != nil {
-		return finalread.AI{}, gateInitialRead(ctx, caseRow.Status, lc1db.Read{}, err)
+		return finalread.AI{}, gateInitialRead(ctx, caseRow.Status, err)
 	}
-	if err := requireLockedInitial(caseRow.Status, initial, reader); err != nil {
+	if err := requireLockedInitial(caseRow.Status, initial.LockedAt, initial.Reader, reader); err != nil {
 		return finalread.AI{}, err
 	}
 
@@ -91,9 +91,9 @@ func (s *FinalReadStore) GetFinal(ctx context.Context, caseID int64, reader stri
 	}
 	initial, err := queries.GetRead(ctx, lc1db.GetReadParams{CaseID: caseID, Kind: initialread.KindInitial})
 	if err != nil {
-		return finalread.Read{}, gateInitialRead(ctx, caseRow.Status, lc1db.Read{}, err)
+		return finalread.Read{}, gateInitialRead(ctx, caseRow.Status, err)
 	}
-	if err := requireLockedInitial(caseRow.Status, initial, reader); err != nil {
+	if err := requireLockedInitial(caseRow.Status, initial.LockedAt, initial.Reader, reader); err != nil {
 		return finalread.Read{}, err
 	}
 
@@ -116,7 +116,7 @@ func (s *FinalReadStore) GetFinal(ctx context.Context, caseID int64, reader stri
 	if err != nil {
 		return finalread.Read{}, classifyFinalRead(ctx, err)
 	}
-	return toFinalRead(final, marks, decisions), nil
+	return toFinalRead(final.ID, final.CaseID, final.Kind, final.Reader, final.LockedAt, marks, decisions), nil
 }
 
 // ReplaceFinal atomically replaces the whole final read: its marks in request
@@ -146,9 +146,9 @@ func (s *FinalReadStore) ReplaceFinal(ctx context.Context, caseID int64, reader 
 
 	initial, err := queries.GetReadForUpdate(ctx, lc1db.GetReadForUpdateParams{CaseID: caseID, Kind: initialread.KindInitial})
 	if err != nil {
-		return finalread.Read{}, gateInitialRead(ctx, caseRow.Status, lc1db.Read{}, err)
+		return finalread.Read{}, gateInitialRead(ctx, caseRow.Status, err)
 	}
-	if err := requireLockedInitial(caseRow.Status, initial, reader); err != nil {
+	if err := requireLockedInitial(caseRow.Status, initial.LockedAt, initial.Reader, reader); err != nil {
 		return finalread.Read{}, err
 	}
 
@@ -210,7 +210,7 @@ func (s *FinalReadStore) ReplaceFinal(ctx context.Context, caseID int64, reader 
 	if err := tx.Commit(ctx); err != nil {
 		return finalread.Read{}, commitFinalFailure(ctx, err)
 	}
-	return toFinalRead(final, marks, decisions), nil
+	return toFinalRead(final.ID, final.CaseID, final.Kind, final.Reader, final.LockedAt, marks, decisions), nil
 }
 
 // Finalize locks the final read and completes the case in one transaction. It
@@ -236,9 +236,9 @@ func (s *FinalReadStore) Finalize(ctx context.Context, caseID int64, reader stri
 
 	initial, err := queries.GetReadForUpdate(ctx, lc1db.GetReadForUpdateParams{CaseID: caseID, Kind: initialread.KindInitial})
 	if err != nil {
-		return finalread.FinalizeResult{}, gateInitialRead(ctx, caseRow.Status, lc1db.Read{}, err)
+		return finalread.FinalizeResult{}, gateInitialRead(ctx, caseRow.Status, err)
 	}
-	if err := requireLockedInitial(caseRow.Status, initial, reader); err != nil {
+	if err := requireLockedInitial(caseRow.Status, initial.LockedAt, initial.Reader, reader); err != nil {
 		return finalread.FinalizeResult{}, err
 	}
 
@@ -307,14 +307,14 @@ func (s *FinalReadStore) Finalize(ctx context.Context, caseID int64, reader stri
 
 // requireLockedInitial enforces the shared disclosure gate on an already-loaded
 // case and initial read.
-func requireLockedInitial(caseStatus string, initial lc1db.Read, reader string) error {
+func requireLockedInitial(caseStatus string, lockedAt pgtype.Timestamptz, initialReader, reader string) error {
 	if caseStatus == finalread.StatusAwaitingRead {
 		return failFinal(finalread.ErrForbidden, "initial read is not locked")
 	}
-	if !initial.LockedAt.Valid {
+	if !lockedAt.Valid {
 		return failFinal(finalread.ErrConflict, "initial read is not locked")
 	}
-	if initial.Reader != reader {
+	if initialReader != reader {
 		return failFinal(finalread.ErrConflict, "initial read has an unexpected reader")
 	}
 	return nil
@@ -323,7 +323,7 @@ func requireLockedInitial(caseStatus string, initial lc1db.Read, reader string) 
 // gateInitialRead maps a failed initial-read load defended by the case state: an
 // awaiting case is forbidden (no disclosure at all), and a later-state case
 // without a readable initial read is an inconsistent conflict.
-func gateInitialRead(ctx context.Context, caseStatus string, _ lc1db.Read, err error) error {
+func gateInitialRead(ctx context.Context, caseStatus string, err error) error {
 	if caseStatus == finalread.StatusAwaitingRead {
 		return failFinal(finalread.ErrForbidden, "initial read is not locked")
 	}
@@ -455,13 +455,13 @@ func listDecisions(ctx context.Context, queries *lc1db.Queries, readID int64) ([
 	return decisions, nil
 }
 
-func toFinalRead(row lc1db.Read, marks []initialread.Mark, decisions []finalread.Decision) finalread.Read {
+func toFinalRead(id, caseID int64, kind, reader string, lockedAt pgtype.Timestamptz, marks []initialread.Mark, decisions []finalread.Decision) finalread.Read {
 	return finalread.Read{
-		ID:                 row.ID,
-		CaseID:             row.CaseID,
-		Kind:               row.Kind,
-		Reader:             row.Reader,
-		LockedAt:           timePointer(row.LockedAt),
+		ID:                 id,
+		CaseID:             caseID,
+		Kind:               kind,
+		Reader:             reader,
+		LockedAt:           timePointer(lockedAt),
 		Marks:              marks,
 		CandidateDecisions: decisions,
 	}
