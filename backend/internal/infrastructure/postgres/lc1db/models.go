@@ -73,9 +73,10 @@ type Read struct {
 	ID           int64
 	CaseID       int64
 	Kind         string
+	Reader       string
 	LockedAt     pgtype.Timestamptz
 	CreatedAt    pgtype.Timestamptz
-	ReaderUserID int64
+	ReaderUserID pgtype.Int8
 }
 
 type User struct {

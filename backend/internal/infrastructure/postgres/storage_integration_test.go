@@ -202,20 +202,6 @@ func assertSQLState(t *testing.T, err error, code, label string) {
 	}
 }
 
-// seedUser inserts one active user with a synthetic (non-real) lookup value and
-// returns its id. Tests never use credential material.
-func seedUser(t *testing.T, tx pgx.Tx, name string) int64 {
-	t.Helper()
-	var id int64
-	err := tx.QueryRow(context.Background(),
-		`INSERT INTO users (display_name, pin_lookup, pin_hash)
-		 VALUES ($1, decode($2, 'hex'), 'synthetic') RETURNING id`, name, randomHex(t, 32)).Scan(&id)
-	if err != nil {
-		t.Fatalf("seed user: %v", err)
-	}
-	return id
-}
-
 // seedCaseRead inserts one case and one initial read and returns their ids.
 func seedCaseRead(t *testing.T, tx pgx.Tx, seriesUID string) (int64, int64) {
 	t.Helper()
@@ -227,10 +213,9 @@ func seedCaseRead(t *testing.T, tx pgx.Tx, seriesUID string) (int64, int64) {
 	if err != nil {
 		t.Fatalf("seed case: %v", err)
 	}
-	readerID := seedUser(t, tx, "dr-synthetic")
 	var readID int64
 	err = tx.QueryRow(ctx,
-		`INSERT INTO reads (case_id, kind, reader_user_id) VALUES ($1, 'initial', $2) RETURNING id`, caseID, readerID).Scan(&readID)
+		`INSERT INTO reads (case_id, kind, reader) VALUES ($1, 'initial', 'dr-synthetic') RETURNING id`, caseID).Scan(&readID)
 	if err != nil {
 		t.Fatalf("seed read: %v", err)
 	}
@@ -430,8 +415,7 @@ func TestLC1StorageConstraints(t *testing.T) {
 		sp.Rollback(ctx)
 
 		sp, _ = tx.Begin(ctx)
-		_, err = sp.Exec(ctx, `INSERT INTO reads (case_id, kind, reader_user_id)
-			SELECT $1, 'draft', reader_user_id FROM reads WHERE id = $2`, caseID, readID)
+		_, err = sp.Exec(ctx, `INSERT INTO reads (case_id, kind, reader) VALUES ($1, 'draft', 'dr-synthetic')`, caseID)
 		assertSQLState(t, err, "23514", "invalid read kind")
 		sp.Rollback(ctx)
 
@@ -518,14 +502,12 @@ func TestLC1StorageConstraints(t *testing.T) {
 
 		sp, _ = tx.Begin(ctx)
 		_, err = sp.Exec(ctx,
-			`INSERT INTO reads (case_id, kind, reader_user_id)
-			 SELECT case_id, 'initial', reader_user_id FROM reads WHERE id = $1`, readID)
+			`INSERT INTO reads (case_id, kind, reader) SELECT case_id, 'initial', 'other' FROM reads WHERE id = $1`, readID)
 		assertSQLState(t, err, "23505", "duplicate case/kind")
 		sp.Rollback(ctx)
 
 		sp, _ = tx.Begin(ctx)
-		_, err = sp.Exec(ctx, `INSERT INTO reads (case_id, kind, reader_user_id)
-			SELECT 999999, 'initial', reader_user_id FROM reads WHERE id = $1`, readID)
+		_, err = sp.Exec(ctx, `INSERT INTO reads (case_id, kind, reader) VALUES (999999, 'initial', 'x')`)
 		assertSQLState(t, err, "23503", "orphan read case")
 		sp.Rollback(ctx)
 

@@ -71,9 +71,9 @@ func (s *InitialReadStore) GetOrCreateInitial(ctx context.Context, caseID int64,
 			return initialread.Read{}, failInitial(initialread.ErrLocked, "case no longer accepts an initial read")
 		}
 		created, createErr := queries.CreateRead(ctx, lc1db.CreateReadParams{
-			CaseID:      caseID,
-			Kind:        initialread.KindInitial,
-			DisplayName: reader,
+			CaseID: caseID,
+			Kind:   initialread.KindInitial,
+			Reader: reader,
 		})
 		if createErr != nil {
 			return initialread.Read{}, classifyInitialRead(ctx, createErr)
@@ -125,9 +125,9 @@ func (s *InitialReadStore) ReplaceInitialMarks(ctx context.Context, caseID int64
 			return nil, failInitial(initialread.ErrLocked, "case no longer accepts an initial read")
 		}
 		created, createErr := queries.CreateRead(ctx, lc1db.CreateReadParams{
-			CaseID:      caseID,
-			Kind:        initialread.KindInitial,
-			DisplayName: reader,
+			CaseID: caseID,
+			Kind:   initialread.KindInitial,
+			Reader: reader,
 		})
 		if createErr != nil {
 			return nil, classifyInitialRead(ctx, createErr)
@@ -217,9 +217,9 @@ func (s *InitialReadStore) SubmitInitial(ctx context.Context, caseID int64, read
 	}
 
 	final, err := queries.CreateRead(ctx, lc1db.CreateReadParams{
-		CaseID:      caseID,
-		Kind:        initialread.KindFinal,
-		DisplayName: reader,
+		CaseID: caseID,
+		Kind:   initialread.KindFinal,
+		Reader: reader,
 	})
 	if err != nil {
 		return initialread.SubmitResult{}, classifyInitialRead(ctx, err)
