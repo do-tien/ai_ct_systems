@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -15,6 +16,7 @@ var testNow = time.Date(2026, 10, 21, 9, 0, 0, 0, time.UTC)
 // fakeCredentials implements the Credentials seam without any real
 // cryptography. Tests only assert the service's decisions.
 type fakeCredentials struct {
+	mu          sync.Mutex
 	verify      func(pin, encoded string) (bool, error)
 	verifyCalls int
 	hash        func(pin string) (string, error)
@@ -52,7 +54,9 @@ func (f *fakeCredentials) PINLookup(pin string) []byte {
 func (f *fakeCredentials) HashPIN(pin string) (string, error) { return f.hash(pin) }
 
 func (f *fakeCredentials) VerifyPIN(pin, encoded string) (bool, error) {
+	f.mu.Lock()
 	f.verifyCalls++
+	f.mu.Unlock()
 	return f.verify(pin, encoded)
 }
 
@@ -74,6 +78,7 @@ func (f *fakeCredentials) SessionDigest(raw string) ([]byte, error) {
 // disabled users disappear from lookup, rotate and revoke delete sessions, and
 // expired sessions are not returned.
 type fakeStore struct {
+	mu          sync.Mutex
 	users       map[int64]User
 	hashes      map[int64]string
 	lookups     map[string]int64
@@ -107,6 +112,8 @@ func newFakeStore() *fakeStore {
 }
 
 func (s *fakeStore) seed(id int64, name, pin, hash string, credentials Credentials) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.users[id] = User{ID: id, DisplayName: name}
 	s.hashes[id] = hash
 	s.lookups[string(credentials.PINLookup(pin))] = id
@@ -132,6 +139,8 @@ func (s *fakeStore) removeSessions(userID int64) {
 }
 
 func (s *fakeStore) CreateUser(_ context.Context, name string, lookup []byte, hash string) (User, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.createCalls++
 	if s.forceCreateErr != nil {
 		return User{}, s.forceCreateErr
@@ -149,6 +158,8 @@ func (s *fakeStore) CreateUser(_ context.Context, name string, lookup []byte, ha
 }
 
 func (s *fakeStore) ListUsers(context.Context) ([]User, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	users := make([]User, 0, len(s.users))
 	for id := int64(1); id <= s.nextID; id++ {
 		if user, ok := s.users[id]; ok {
@@ -159,6 +170,8 @@ func (s *fakeStore) ListUsers(context.Context) ([]User, error) {
 }
 
 func (s *fakeStore) FindActiveUserByPINLookup(_ context.Context, lookup []byte) (User, string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.forceLookupErr != nil {
 		return User{}, "", s.forceLookupErr
 	}
@@ -170,6 +183,8 @@ func (s *fakeStore) FindActiveUserByPINLookup(_ context.Context, lookup []byte) 
 }
 
 func (s *fakeStore) RotatePIN(_ context.Context, userID int64, lookup []byte, hash string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.rotateCalls++
 	if s.forceRotateErr != nil {
 		return s.forceRotateErr
@@ -189,6 +204,8 @@ func (s *fakeStore) RotatePIN(_ context.Context, userID int64, lookup []byte, ha
 }
 
 func (s *fakeStore) RevokeUser(_ context.Context, userID int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.revokeCalls++
 	if s.forceRevokeErr != nil {
 		return s.forceRevokeErr
@@ -206,11 +223,15 @@ func (s *fakeStore) RevokeUser(_ context.Context, userID int64) error {
 }
 
 func (s *fakeStore) CreateSession(_ context.Context, digest []byte, userID int64, expiresAt time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.sessions[string(digest)] = Session{User: s.users[userID], ExpiresAt: expiresAt}
 	return nil
 }
 
 func (s *fakeStore) FindSession(_ context.Context, digest []byte, now time.Time) (Session, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.forceSessionErr != nil {
 		return Session{}, s.forceSessionErr
 	}
@@ -225,12 +246,16 @@ func (s *fakeStore) FindSession(_ context.Context, digest []byte, now time.Time)
 }
 
 func (s *fakeStore) DeleteSession(_ context.Context, digest []byte) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.deleteCalls++
 	delete(s.sessions, string(digest))
 	return nil
 }
 
 func (s *fakeStore) DeleteExpiredSessions(_ context.Context, _ time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.expireCalls++
 	return nil
 }
@@ -705,5 +730,67 @@ func TestNoGeneratedSecretAppearsInErrors(t *testing.T) {
 	}
 	if bytes.Contains([]byte(err.Error()), []byte("12345678")) {
 		t.Fatal("error text contains a generated secret")
+	}
+}
+
+func TestConcurrentLoginsAreSafe(t *testing.T) {
+	store := newFakeStore()
+	credentials := newFakeCredentials("12345678", "hash:12345678")
+	store.seed(1, "Alice", "12345678", "hash:12345678", credentials)
+	service := NewService(store, credentials)
+	service.limiter.maxEntries = 64
+
+	const (
+		workers  = 32
+		attempts = 50
+	)
+	var wait sync.WaitGroup
+	for worker := range workers {
+		wait.Add(1)
+		go func(worker int) {
+			defer wait.Done()
+			for attempt := range attempts {
+				pin := "00000000"
+				if attempt%2 == 0 {
+					pin = "12345678"
+				}
+				clientIP := fmt.Sprintf("10.0.%d.%d", worker%4, attempt%8)
+				_, _, _ = service.Login(context.Background(), pin, clientIP, testNow)
+			}
+		}(worker)
+	}
+	wait.Wait()
+	if size := len(service.limiter.entries); size > service.limiter.maxEntries {
+		t.Fatalf("limiter holds %d entries, want at most %d", size, service.limiter.maxEntries)
+	}
+}
+
+func TestLoginLimiterDoesNotEvictLiveLocks(t *testing.T) {
+	store := newFakeStore()
+	credentials := newFakeCredentials("12345678", "hash:12345678")
+	store.seed(1, "Alice", "12345678", "hash:12345678", credentials)
+	service := NewService(store, credentials)
+	service.limiter.maxEntries = 3
+
+	for range 5 {
+		if _, _, err := service.Login(context.Background(), "00000000", "10.0.0.1", testNow); !errors.Is(err, ErrInvalidCredentials) {
+			t.Fatalf("failure error = %v", err)
+		}
+	}
+	for i := 1; i <= 6; i++ {
+		pin := fmt.Sprintf("000000%02d", i)
+		clientIP := fmt.Sprintf("10.0.1.%d", i)
+		if _, _, err := service.Login(context.Background(), pin, clientIP, testNow); !errors.Is(err, ErrInvalidCredentials) {
+			t.Fatalf("fill attempt %d error = %v", i, err)
+		}
+	}
+
+	_, _, err := service.Login(context.Background(), "00000000", "10.0.0.1", testNow)
+	if !errors.Is(err, ErrThrottled) {
+		t.Fatalf("locked key error = %v, want throttled", err)
+	}
+	var throttled *ThrottledError
+	if !errors.As(err, &throttled) || throttled.RetryAfter() <= 0 {
+		t.Fatalf("throttled error does not carry a positive retry-after: %v", err)
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 )
@@ -228,9 +229,12 @@ type limiterEntry struct {
 	lockedUntil time.Time
 }
 
-// loginLimiter is a bounded, process-local failure counter. Locked entries are
-// never extended by attempts made while locked.
+// loginLimiter is a bounded, process-local failure counter. Login is
+// request-facing, so every operation is serialized by mu. Locked entries are
+// never extended by attempts made while locked and are evicted only after all
+// unlocked entries when the map is full.
 type loginLimiter struct {
+	mu         sync.Mutex
 	entries    map[string]*limiterEntry
 	maxEntries int
 }
@@ -244,7 +248,9 @@ func newLoginLimiter(maxEntries int) *loginLimiter {
 
 // check reports whether key is locked and, if so, for how much longer.
 func (l *loginLimiter) check(key string, now time.Time) (time.Duration, bool) {
-	l.prune(now)
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.pruneLocked(now)
 	entry, ok := l.entries[key]
 	if !ok || entry.lockedUntil.IsZero() {
 		return 0, false
@@ -259,7 +265,9 @@ func (l *loginLimiter) check(key string, now time.Time) (time.Duration, bool) {
 // recordFailure increments the window counter and locks the key at five
 // failures. The fifth failure itself reports invalid credentials.
 func (l *loginLimiter) recordFailure(key string, now time.Time) {
-	l.prune(now)
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.pruneLocked(now)
 	entry, ok := l.entries[key]
 	if !ok {
 		entry = &limiterEntry{firstSeen: now}
@@ -274,15 +282,18 @@ func (l *loginLimiter) recordFailure(key string, now time.Time) {
 	if entry.failures >= maxFailures {
 		entry.lockedUntil = now.Add(lockDuration)
 	}
-	l.enforceBound(now)
+	l.enforceBoundLocked()
 }
 
 // clear removes the key after a successful login.
-func (l *loginLimiter) clear(key string) { delete(l.entries, key) }
+func (l *loginLimiter) clear(key string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	delete(l.entries, key)
+}
 
-// prune drops expired locks and quiet keys. It runs on every login so the map
-// cannot grow without bound in a long-lived process.
-func (l *loginLimiter) prune(now time.Time) {
+// pruneLocked drops expired locks and quiet keys. The caller holds mu.
+func (l *loginLimiter) pruneLocked(now time.Time) {
 	for key, entry := range l.entries {
 		if !entry.lockedUntil.IsZero() {
 			if !entry.lockedUntil.After(now) {
@@ -296,18 +307,28 @@ func (l *loginLimiter) prune(now time.Time) {
 	}
 }
 
-// enforceBound evicts the least recently seen key until the map fits.
-func (l *loginLimiter) enforceBound(now time.Time) {
-	if len(l.entries) <= l.maxEntries {
-		return
-	}
+// enforceBoundLocked evicts the least recently seen unlocked entry until the
+// map fits. Only when every entry is locked does it evict the oldest lock, so a
+// flood of new keys cannot discard a live throttle. The caller holds mu.
+func (l *loginLimiter) enforceBoundLocked() {
 	for len(l.entries) > l.maxEntries {
 		var oldestKey string
 		var oldest time.Time
 		for key, entry := range l.entries {
+			if !entry.lockedUntil.IsZero() {
+				continue
+			}
 			if oldestKey == "" || entry.lastSeen.Before(oldest) {
 				oldestKey = key
 				oldest = entry.lastSeen
+			}
+		}
+		if oldestKey == "" {
+			for key, entry := range l.entries {
+				if oldestKey == "" || entry.lastSeen.Before(oldest) {
+					oldestKey = key
+					oldest = entry.lastSeen
+				}
 			}
 		}
 		delete(l.entries, oldestKey)
