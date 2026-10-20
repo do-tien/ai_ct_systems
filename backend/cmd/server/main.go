@@ -18,11 +18,13 @@ import (
 	"time"
 
 	"nodule-reader/backend/internal/application/aijob"
+	"nodule-reader/backend/internal/application/auth"
 	"nodule-reader/backend/internal/application/caseimport"
 	"nodule-reader/backend/internal/application/finalread"
 	"nodule-reader/backend/internal/application/health"
 	"nodule-reader/backend/internal/application/initialread"
 	"nodule-reader/backend/internal/config"
+	"nodule-reader/backend/internal/infrastructure/authcrypto"
 	"nodule-reader/backend/internal/infrastructure/orthanc"
 	"nodule-reader/backend/internal/infrastructure/postgres"
 	"nodule-reader/backend/internal/infrastructure/python"
@@ -60,6 +62,14 @@ func main() {
 	)
 	healthService := health.NewService(postgres.NewPoolProbe(pool), orthancClient)
 
+	credentials, err := authcrypto.NewCredentials(cfg.AuthPinPepper)
+	if err != nil {
+		// The constructor never echoes the configured pepper.
+		log.Printf("authentication configuration error: %v", err)
+		os.Exit(1)
+	}
+	authentication := auth.NewService(postgres.NewAuthStore(pool), credentials)
+
 	initialReadService := initialread.NewService(postgres.NewInitialReadStore(pool))
 	finalReadService := finalread.NewService(postgres.NewFinalReadStore(pool))
 
@@ -89,6 +99,8 @@ func main() {
 			finalReadService,
 			httpapi.NewUploadHandler(uploadService, cfg.UploadDir),
 			httpapi.NewDICOMwebHandler(dicomwebProxy),
+			authentication,
+			cfg.AuthCookieSecure,
 		),
 		ReadHeaderTimeout: 5 * time.Second,
 	}

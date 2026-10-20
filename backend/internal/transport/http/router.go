@@ -12,37 +12,64 @@ import (
 )
 
 // NewRouter builds the HTTP handler around the health use case, the
-// independent-read API, the post-lock AI/final API, the DICOM upload endpoints
-// and the read-only DICOMweb proxy gate. Every dependency is required: the
-// composition root always injects the real upload handler and the real gate
-// wrapping the Orthanc proxy, never a disabled or placeholder route.
-func NewRouter(healthService *health.Service, initialReadService *initialread.Service, finalReadService *finalread.Service, uploadHandler http.Handler, dicomwebHandler http.Handler) http.Handler {
+// independent-read API, the post-lock AI/final API, the DICOM upload endpoints,
+// the read-only DICOMweb proxy gate and the PIN authentication service. Every
+// dependency is required: the composition root always injects the real upload
+// handler, the real gate wrapping the Orthanc proxy and the real auth service,
+// never a disabled or placeholder route.
+//
+// The health endpoint, login and session inspection stay public. Logout, every
+// remaining API route and both DICOMweb registrations require a valid session.
+// Unsafe browser requests are checked against the preserved public authority
+// before any handler or body parsing runs.
+func NewRouter(
+	healthService *health.Service,
+	initialReadService *initialread.Service,
+	finalReadService *finalread.Service,
+	uploadHandler http.Handler,
+	dicomwebHandler http.Handler,
+	authentication authService,
+	sessionCookieSecure bool,
+) http.Handler {
 	router := chi.NewRouter()
+	router.Use(sameOriginGuard)
+
 	router.Method(http.MethodGet, "/healthz", &healthHandler{health: healthService})
 
-	initialRead := &initialReadHandler{service: initialReadService}
-	router.Get("/api/cases/{id}", initialRead.getCase)
-	router.Get("/api/cases/{id}/reads/initial", initialRead.getInitial)
-	router.Put("/api/cases/{id}/reads/initial/marks", initialRead.putMarks)
-	router.Post("/api/cases/{id}/reads/initial/submit", initialRead.submit)
+	auth := newAuthHandler(authentication, sessionCookieSecure)
+	router.Post("/api/auth/login", auth.login)
+	router.Get("/api/auth/session", auth.session)
 
-	finalRead := &finalReadHandler{service: finalReadService}
-	router.Get("/api/cases/{id}/ai", finalRead.getAI)
-	router.Get("/api/cases/{id}/reads/final", finalRead.getFinal)
-	router.Put("/api/cases/{id}/reads/final", finalRead.putFinal)
-	router.Post("/api/cases/{id}/finalize", finalRead.finalize)
-	// Register the upload namespace with and without a trailing wildcard so both
-	// "/api/uploads" and "/api/uploads/..." reach the upload handler, which
-	// inspects the unnormalized request path itself. The handler only accepts
-	// the documented method/path pairs.
-	router.Handle("/api/uploads", uploadHandler)
-	router.Handle("/api/uploads/*", uploadHandler)
-	// Register the namespace with and without a trailing wildcard so both
-	// "/dicom-web" and "/dicom-web/..." reach the gate. The gate inspects the
-	// unnormalized request path itself, so no path-cleaning middleware may be
-	// added here: cleaning would turn a rejected traversal into an accepted
-	// route before the gate runs.
-	router.Handle("/dicom-web", dicomwebHandler)
-	router.Handle("/dicom-web/*", dicomwebHandler)
+	sessions := newSessionMiddleware(authentication)
+	router.Group(func(protected chi.Router) {
+		protected.Use(sessions.requireSession)
+
+		protected.Post("/api/auth/logout", auth.logout)
+
+		initialRead := &initialReadHandler{service: initialReadService}
+		protected.Get("/api/cases/{id}", initialRead.getCase)
+		protected.Get("/api/cases/{id}/reads/initial", initialRead.getInitial)
+		protected.Put("/api/cases/{id}/reads/initial/marks", initialRead.putMarks)
+		protected.Post("/api/cases/{id}/reads/initial/submit", initialRead.submit)
+
+		finalRead := &finalReadHandler{service: finalReadService}
+		protected.Get("/api/cases/{id}/ai", finalRead.getAI)
+		protected.Get("/api/cases/{id}/reads/final", finalRead.getFinal)
+		protected.Put("/api/cases/{id}/reads/final", finalRead.putFinal)
+		protected.Post("/api/cases/{id}/finalize", finalRead.finalize)
+		// Register the upload namespace with and without a trailing wildcard so
+		// both "/api/uploads" and "/api/uploads/..." reach the upload handler,
+		// which inspects the unnormalized request path itself. The handler only
+		// accepts the documented method/path pairs.
+		protected.Handle("/api/uploads", uploadHandler)
+		protected.Handle("/api/uploads/*", uploadHandler)
+		// Register the namespace with and without a trailing wildcard so both
+		// "/dicom-web" and "/dicom-web/..." reach the gate. The gate inspects
+		// the unnormalized request path itself, so no path-cleaning middleware
+		// may be added here: cleaning would turn a rejected traversal into an
+		// accepted route before the gate runs.
+		protected.Handle("/dicom-web", dicomwebHandler)
+		protected.Handle("/dicom-web/*", dicomwebHandler)
+	})
 	return router
 }

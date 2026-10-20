@@ -27,6 +27,10 @@ const (
 	codeDependencyAvailable = "DEPENDENCY_UNAVAILABLE"
 	codeCommitUnknown       = "COMMIT_OUTCOME_UNKNOWN"
 	codeInternalError       = "INTERNAL_ERROR"
+	codeAuthRequired        = "AUTH_REQUIRED"
+	codeInvalidCredentials  = "INVALID_CREDENTIALS"
+	codeTooManyAttempts     = "TOO_MANY_ATTEMPTS"
+	codeOriginNotAllowed    = "ORIGIN_NOT_ALLOWED"
 )
 
 // maxMarksBodyBytes bounds one marks replacement body.
@@ -45,6 +49,10 @@ var apiErrorMessages = map[string]string{
 	codeDependencyAvailable: "storage is unavailable",
 	codeCommitUnknown:       "commit outcome is unknown; reload before retrying",
 	codeInternalError:       "internal error",
+	codeAuthRequired:        "authentication is required",
+	codeInvalidCredentials:  "credentials are invalid",
+	codeTooManyAttempts:     "too many authentication attempts; retry later",
+	codeOriginNotAllowed:    "request origin is not allowed",
 }
 
 type apiErrorEnvelope struct {

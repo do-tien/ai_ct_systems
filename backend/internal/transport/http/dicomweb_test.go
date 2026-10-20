@@ -177,8 +177,10 @@ func TestDICOMwebRouterRegistration(t *testing.T) {
 				nil, // unused final-read dependency for DICOMweb tests
 				nil, // unused upload dependency for DICOMweb tests
 				NewDICOMwebHandler(terminal),
+				newFakeAuth(),
+				false,
 			)
-			request := httptest.NewRequest(testCase.method, testCase.target, nil)
+			request := withTestSession(httptest.NewRequest(testCase.method, testCase.target, nil))
 			request.Host = "localhost"
 			recorder := httptest.NewRecorder()
 			handler.ServeHTTP(recorder, request)

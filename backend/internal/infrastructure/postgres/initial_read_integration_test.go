@@ -558,7 +558,7 @@ func TestInitialReadHTTPIntegration(t *testing.T) {
 	h.grantRuntime(t)
 	pool := importRuntimePool(t, h)
 	store := postgres.NewInitialReadStore(pool)
-	handler := httpapi.NewRouter(nil, initialread.NewService(store), nil, nil, http.NotFoundHandler())
+	handler := httpapi.NewRouter(nil, initialread.NewService(store), nil, nil, http.NotFoundHandler(), integrationAuthService{}, false)
 
 	caseID := seedCase(t, pool, "1.2.3.4.5.1401", "awaiting_read")
 	if _, err := pool.Exec(ctx, `INSERT INTO ai_jobs (case_id, status) VALUES ($1, 'queued')`, caseID); err != nil {
@@ -572,7 +572,7 @@ func TestInitialReadHTTPIntegration(t *testing.T) {
 		} else {
 			reader = strings.NewReader("")
 		}
-		request := httptest.NewRequest(method, target, reader)
+		request := withIntegrationSession(httptest.NewRequest(method, target, reader))
 		if contentType != "" {
 			request.Header.Set("Content-Type", contentType)
 		}

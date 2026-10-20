@@ -86,19 +86,25 @@ func uploadRequest(t *testing.T, method, target string, parts []uploadPart) *htt
 	return request
 }
 
-func uploadRouter(t *testing.T, service uploadService, limits upload.Limits, maxBytes int64) http.Handler {
+func newUploadHandlerForTest(t *testing.T, service uploadService, limits upload.Limits, maxBytes int64) *uploadHandler {
 	t.Helper()
-	handler := &uploadHandler{
+	return &uploadHandler{
 		service:         service,
 		uploadDir:       t.TempDir(),
 		limits:          limits,
 		maxRequestBytes: maxBytes,
 	}
-	return NewRouter(nil, nil, nil, handler, http.NotFoundHandler())
+}
+
+func uploadRouter(t *testing.T, service uploadService, limits upload.Limits, maxBytes int64) http.Handler {
+	t.Helper()
+	handler := newUploadHandlerForTest(t, service, limits, maxBytes)
+	return NewRouter(nil, nil, nil, handler, http.NotFoundHandler(), newFakeAuth(), false)
 }
 
 func doUpload(t *testing.T, router http.Handler, request *http.Request) *httptest.ResponseRecorder {
 	t.Helper()
+	withTestSession(request)
 	recorder := httptest.NewRecorder()
 	router.ServeHTTP(recorder, request)
 	return recorder
@@ -195,11 +201,14 @@ func TestUploadCreateForwardsSkipCount(t *testing.T) {
 
 func TestUploadCreateRejectsCrossOrigin(t *testing.T) {
 	service := &fakeUploadService{prepareResult: sampleSession()}
-	router := uploadRouter(t, service, upload.DefaultLimits(), 1<<20)
+	// The router also rejects cross-origin writes; call the handler directly so
+	// its own defense-in-depth check stays covered.
+	handler := newUploadHandlerForTest(t, service, upload.DefaultLimits(), 1<<20)
 	request := uploadRequest(t, http.MethodPost, "/api/uploads", []uploadPart{{name: "a", data: []byte("a")}})
 	request.Header.Set("Origin", "http://evil.example")
 
-	recorder := doUpload(t, router, request)
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusForbidden || uploadErrorCode(t, decodeBody(t, recorder)) != "ORIGIN_NOT_ALLOWED" {
 		t.Fatalf("want 403 ORIGIN_NOT_ALLOWED, got %d %s", recorder.Code, recorder.Body.String())
 	}
@@ -345,10 +354,11 @@ func TestUploadConfirmRejectsMalformedBodies(t *testing.T) {
 
 func TestUploadConfirmRejectsCrossOrigin(t *testing.T) {
 	service := &fakeUploadService{confirmResult: caseimport.Result{CaseID: 1}}
-	router := uploadRouter(t, service, upload.DefaultLimits(), 1<<20)
+	handler := newUploadHandlerForTest(t, service, upload.DefaultLimits(), 1<<20)
 	request := jsonRequest(t, http.MethodPost, "/api/uploads/s/cases", `{"series_id":"k"}`)
 	request.Header.Set("Origin", "null")
-	recorder := doUpload(t, router, request)
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusForbidden || uploadErrorCode(t, decodeBody(t, recorder)) != "ORIGIN_NOT_ALLOWED" {
 		t.Fatalf("want 403 ORIGIN_NOT_ALLOWED, got %d %s", recorder.Code, recorder.Body.String())
 	}
