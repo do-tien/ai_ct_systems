@@ -48,7 +48,24 @@ func newSessionMiddleware(service authService) *sessionMiddleware {
 	return &sessionMiddleware{service: service, now: time.Now}
 }
 
-func (m *sessionMiddleware) requireSession(next http.Handler) http.Handler {
+// gate protects by path, not only by registered route: every /api and
+// /dicom-web request must authenticate, including unknown paths and methods
+// that later produce 404/405. Health, login and session inspection are the only
+// public requests; everything else passes through unchanged.
+func (m *sessionMiddleware) gate(next http.Handler) http.Handler {
+	authenticated := m.authenticate(next)
+	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if isPublicRequest(request) || !requiresSession(request.URL.Path) {
+			next.ServeHTTP(writer, request)
+			return
+		}
+		authenticated.ServeHTTP(writer, request)
+	})
+}
+
+// authenticate resolves the session cookie and attaches the principal. It runs
+// exactly once per protected request.
+func (m *sessionMiddleware) authenticate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		token, ok := sessionToken(request)
 		if !ok {
@@ -64,6 +81,28 @@ func (m *sessionMiddleware) requireSession(next http.Handler) http.Handler {
 		ctx := context.WithValue(request.Context(), principalContextKey{}, principal)
 		next.ServeHTTP(writer, request.WithContext(ctx))
 	})
+}
+
+// isPublicRequest lists the exact public method/path pairs. A different method
+// on the same path is protected when the path is under /api.
+func isPublicRequest(request *http.Request) bool {
+	switch request.URL.Path {
+	case "/healthz":
+		return request.Method == http.MethodGet
+	case "/api/auth/login":
+		return request.Method == http.MethodPost
+	case "/api/auth/session":
+		return request.Method == http.MethodGet
+	default:
+		return false
+	}
+}
+
+// requiresSession reports whether a path belongs to the authenticated API or
+// DICOMweb surfaces. The raw path is inspected; no cleaning happens here.
+func requiresSession(path string) bool {
+	return path == "/api" || strings.HasPrefix(path, "/api/") ||
+		path == "/dicom-web" || strings.HasPrefix(path, "/dicom-web/")
 }
 
 // sessionToken extracts a present, non-empty session cookie.

@@ -32,44 +32,40 @@ func NewRouter(
 	sessionCookieSecure bool,
 ) http.Handler {
 	router := chi.NewRouter()
+	sessions := newSessionMiddleware(authentication)
 	router.Use(sameOriginGuard)
+	router.Use(sessions.gate)
 
 	router.Method(http.MethodGet, "/healthz", &healthHandler{health: healthService})
 
 	auth := newAuthHandler(authentication, sessionCookieSecure)
 	router.Post("/api/auth/login", auth.login)
 	router.Get("/api/auth/session", auth.session)
+	router.Post("/api/auth/logout", auth.logout)
 
-	sessions := newSessionMiddleware(authentication)
-	router.Group(func(protected chi.Router) {
-		protected.Use(sessions.requireSession)
+	initialRead := &initialReadHandler{service: initialReadService}
+	router.Get("/api/cases/{id}", initialRead.getCase)
+	router.Get("/api/cases/{id}/reads/initial", initialRead.getInitial)
+	router.Put("/api/cases/{id}/reads/initial/marks", initialRead.putMarks)
+	router.Post("/api/cases/{id}/reads/initial/submit", initialRead.submit)
 
-		protected.Post("/api/auth/logout", auth.logout)
-
-		initialRead := &initialReadHandler{service: initialReadService}
-		protected.Get("/api/cases/{id}", initialRead.getCase)
-		protected.Get("/api/cases/{id}/reads/initial", initialRead.getInitial)
-		protected.Put("/api/cases/{id}/reads/initial/marks", initialRead.putMarks)
-		protected.Post("/api/cases/{id}/reads/initial/submit", initialRead.submit)
-
-		finalRead := &finalReadHandler{service: finalReadService}
-		protected.Get("/api/cases/{id}/ai", finalRead.getAI)
-		protected.Get("/api/cases/{id}/reads/final", finalRead.getFinal)
-		protected.Put("/api/cases/{id}/reads/final", finalRead.putFinal)
-		protected.Post("/api/cases/{id}/finalize", finalRead.finalize)
-		// Register the upload namespace with and without a trailing wildcard so
-		// both "/api/uploads" and "/api/uploads/..." reach the upload handler,
-		// which inspects the unnormalized request path itself. The handler only
-		// accepts the documented method/path pairs.
-		protected.Handle("/api/uploads", uploadHandler)
-		protected.Handle("/api/uploads/*", uploadHandler)
-		// Register the namespace with and without a trailing wildcard so both
-		// "/dicom-web" and "/dicom-web/..." reach the gate. The gate inspects
-		// the unnormalized request path itself, so no path-cleaning middleware
-		// may be added here: cleaning would turn a rejected traversal into an
-		// accepted route before the gate runs.
-		protected.Handle("/dicom-web", dicomwebHandler)
-		protected.Handle("/dicom-web/*", dicomwebHandler)
-	})
+	finalRead := &finalReadHandler{service: finalReadService}
+	router.Get("/api/cases/{id}/ai", finalRead.getAI)
+	router.Get("/api/cases/{id}/reads/final", finalRead.getFinal)
+	router.Put("/api/cases/{id}/reads/final", finalRead.putFinal)
+	router.Post("/api/cases/{id}/finalize", finalRead.finalize)
+	// Register the upload namespace with and without a trailing wildcard so
+	// both "/api/uploads" and "/api/uploads/..." reach the upload handler,
+	// which inspects the unnormalized request path itself. The handler only
+	// accepts the documented method/path pairs.
+	router.Handle("/api/uploads", uploadHandler)
+	router.Handle("/api/uploads/*", uploadHandler)
+	// Register the namespace with and without a trailing wildcard so both
+	// "/dicom-web" and "/dicom-web/..." reach the gate. The gate inspects the
+	// unnormalized request path itself, so no path-cleaning middleware may be
+	// added here: cleaning would turn a rejected traversal into an accepted
+	// route before the gate runs.
+	router.Handle("/dicom-web", dicomwebHandler)
+	router.Handle("/dicom-web/*", dicomwebHandler)
 	return router
 }

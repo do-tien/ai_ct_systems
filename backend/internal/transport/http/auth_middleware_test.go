@@ -320,3 +320,107 @@ func TestPrincipalFromContextRoundTrip(t *testing.T) {
 		t.Fatalf("principal = %+v, ok = %v", got, ok)
 	}
 }
+
+// The session gate must protect by path, not only by registered route, so a
+// mistyped or trailing-slash /api request cannot reveal public routing.
+func TestSessionGateProtectsUnmatchedAPIRoutes(t *testing.T) {
+	router := NewRouter(nil, nil, nil, &captureHandler{}, NewDICOMwebHandler(&gateTerminal{}), newFakeAuth(), false)
+
+	unmatched := []struct {
+		method string
+		target string
+	}{
+		{http.MethodGet, "/api"},
+		{http.MethodGet, "/api/nonexistent"},
+		{http.MethodGet, "/api/cases/1/"},
+		{http.MethodDelete, "/api/cases/1"},
+		{http.MethodGet, "/dicom-web/"},
+		{http.MethodPost, "/dicom-web/studies"},
+	}
+
+	for _, testCase := range unmatched {
+		t.Run("unauthenticated "+testCase.method+" "+testCase.target, func(t *testing.T) {
+			request := httptest.NewRequest(testCase.method, testCase.target, nil)
+			if strings.HasPrefix(testCase.target, "/dicom-web") {
+				request.Host = "localhost"
+			}
+			recorder, panicked := serveSafely(router, request)
+			if panicked != nil {
+				t.Fatalf("unmatched API request reached a handler: %v", panicked)
+			}
+			assertAuthError(t, recorder, http.StatusUnauthorized, codeAuthRequired)
+		})
+
+		t.Run("authenticated "+testCase.method+" "+testCase.target, func(t *testing.T) {
+			request := withTestSession(httptest.NewRequest(testCase.method, testCase.target, nil))
+			if strings.HasPrefix(testCase.target, "/dicom-web") {
+				request.Host = "localhost"
+			}
+			recorder, panicked := serveSafely(router, request)
+			if panicked != nil {
+				t.Fatalf("authenticated unmatched request panicked: %v", panicked)
+			}
+			if recorder.Code != http.StatusNotFound && recorder.Code != http.StatusMethodNotAllowed {
+				t.Fatalf("status = %d, want 404 or 405 (body %q)", recorder.Code, recorder.Body.String())
+			}
+			if recorder.Code == http.StatusUnauthorized {
+				t.Fatal("authenticated request was rejected")
+			}
+		})
+	}
+}
+
+// The gate must skip authentication only for the documented public requests.
+func TestSessionGateLeavesOnlyPublicRequestsUngated(t *testing.T) {
+	service := newFakeAuth()
+	service.loginErr = auth.ErrInvalidCredentials
+	router := NewRouter(
+		health.NewService(stubProbe{}, stubProbe{}),
+		nil, nil,
+		&captureHandler{},
+		NewDICOMwebHandler(&gateTerminal{}),
+		service,
+		false,
+	)
+
+	t.Run("GET healthz", func(t *testing.T) {
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+		if recorder.Code != http.StatusOK || service.authenticateCalls != 0 {
+			t.Fatalf("status = %d, authenticate calls = %d", recorder.Code, service.authenticateCalls)
+		}
+	})
+
+	t.Run("POST login", func(t *testing.T) {
+		recorder := postLogin(t, router, `{"pin":"00001234"}`, "application/json")
+		assertAuthError(t, recorder, http.StatusUnauthorized, codeInvalidCredentials)
+		if service.loginCalls != 1 || service.authenticateCalls != 0 {
+			t.Fatalf("login calls = %d, authenticate calls = %d", service.loginCalls, service.authenticateCalls)
+		}
+	})
+
+	t.Run("GET session authenticates in its handler", func(t *testing.T) {
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, withTestSession(httptest.NewRequest(http.MethodGet, "/api/auth/session", nil)))
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("status = %d (%s)", recorder.Code, recorder.Body.String())
+		}
+		if service.authenticateCalls != 1 {
+			t.Fatalf("authenticate calls = %d", service.authenticateCalls)
+		}
+	})
+
+	t.Run("non-API paths pass through unchanged", func(t *testing.T) {
+		service.authenticateCalls = 0
+		recorder, panicked := serveSafely(router, httptest.NewRequest(http.MethodPost, "/healthz", nil))
+		if panicked != nil {
+			t.Fatalf("panicked: %v", panicked)
+		}
+		if recorder.Code != http.StatusMethodNotAllowed {
+			t.Fatalf("status = %d, want 405", recorder.Code)
+		}
+		if service.authenticateCalls != 0 {
+			t.Fatalf("authenticate calls = %d", service.authenticateCalls)
+		}
+	})
+}
