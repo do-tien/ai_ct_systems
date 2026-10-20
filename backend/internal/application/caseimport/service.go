@@ -40,6 +40,9 @@ var (
 	ErrAlreadyConfirmed = errors.New("upload session already confirmed")
 	// ErrNotFound reports an unknown upload session.
 	ErrNotFound = errors.New("upload session not found")
+	// ErrForbidden reports an upload session owned by another authenticated
+	// user.
+	ErrForbidden = errors.New("upload session belongs to another user")
 )
 
 // ReasonError attaches a fixed, non-identifying reason to a category sentinel.
@@ -78,6 +81,11 @@ type ImportedCase struct {
 	OrthancSeriesID     string
 	FrameOfReferenceUID string
 	InstanceCount       int
+	// ActorUserID is the authenticated importer recorded on the audit event.
+	ActorUserID int64
+	// ActorDisplayName is that importer's display-name snapshot. When empty the
+	// adapter resolves it from the same user row.
+	ActorDisplayName string
 }
 
 // UploadedInstance is one accepted Orthanc upload response.
@@ -157,7 +165,10 @@ func NewServiceWithLimits(archive Archive, store Store, limits Limits) *Service 
 // session. It never creates a case and never reveals AI data. A file Orthanc
 // rejects fails the whole preparation; a valid DICOM series that is not
 // suitable still appears as a blocked option with a fixed reason code.
-func (s *Service) Prepare(ctx context.Context, files []StagedFile, skippedFiles int) (Session, error) {
+func (s *Service) Prepare(ctx context.Context, files []StagedFile, skippedFiles int, userID int64) (Session, error) {
+	if userID <= 0 {
+		return Session{}, Fail(ErrInvalidInput, "a valid user is required")
+	}
 	if len(files) == 0 {
 		return Session{}, Fail(ErrInvalidInput, "no files were uploaded")
 	}
@@ -249,7 +260,7 @@ func (s *Service) Prepare(ctx context.Context, files []StagedFile, skippedFiles 
 		return Session{}, Fail(ErrDependency, "cannot allocate an upload session")
 	}
 	now := time.Now()
-	state := &sessionState{id: token, expiresAt: now.Add(s.limits.SessionTTL), skipped: skippedFiles, series: series}
+	state := &sessionState{id: token, ownerUserID: userID, expiresAt: now.Add(s.limits.SessionTTL), skipped: skippedFiles, series: series}
 	s.mu.Lock()
 	s.evictExpiredLocked(now)
 	if len(s.sessions) >= s.limits.MaxSessions {
@@ -265,11 +276,11 @@ func (s *Service) Prepare(ctx context.Context, files []StagedFile, skippedFiles 
 // repeated confirm of the same series returns the same result; a different
 // series after a successful confirm is refused. An uncertain commit leaves the
 // session unconfirmed so Get can reconcile it later.
-func (s *Service) Confirm(ctx context.Context, uploadID, seriesKey string) (Result, error) {
+func (s *Service) Confirm(ctx context.Context, uploadID, seriesKey string, userID int64) (Result, error) {
 	if ctx.Err() != nil {
 		return Result{}, Fail(ErrCanceled, "upload canceled before confirmation")
 	}
-	state, err := s.session(uploadID)
+	state, err := s.session(uploadID, userID)
 	if err != nil {
 		return Result{}, err
 	}
@@ -308,6 +319,7 @@ func (s *Service) Confirm(ctx context.Context, uploadID, seriesKey string) (Resu
 		return Result{}, Fail(ErrDependency, "series inventory changed during confirmation")
 	}
 	imported.Source = s.source
+	imported.ActorUserID = state.ownerUserID
 
 	existingID, found, err := s.store.FindCaseBySeriesUID(ctx, imported.SeriesInstanceUID)
 	if err != nil {
@@ -345,8 +357,8 @@ func (s *Service) Confirm(ctx context.Context, uploadID, seriesKey string) (Resu
 // an unknown commit outcome it re-checks the case by the validated Series
 // Instance UID and completes the session only when the row is really visible.
 // An unreachable database leaves the session unconfirmed and returns no error.
-func (s *Service) Get(ctx context.Context, uploadID string) (Session, error) {
-	state, err := s.session(uploadID)
+func (s *Service) Get(ctx context.Context, uploadID string, userID int64) (Session, error) {
+	state, err := s.session(uploadID, userID)
 	if err != nil {
 		return Session{}, err
 	}
@@ -365,13 +377,17 @@ func (s *Service) Get(ctx context.Context, uploadID string) (Session, error) {
 }
 
 // Discard drops an unconfirmed session. It never deletes a case or any Orthanc
-// data; an already expired session is reported as not found.
-func (s *Service) Discard(ctx context.Context, uploadID string) error {
+// data; an expired session is reported as expired and an unknown one as not
+// found.
+func (s *Service) Discard(ctx context.Context, uploadID string, userID int64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	state, ok := s.sessions[uploadID]
 	if !ok {
 		return Fail(ErrNotFound, "unknown upload session")
+	}
+	if state.ownerUserID != userID {
+		return Fail(ErrForbidden, "upload session belongs to another user")
 	}
 	if expired(state, time.Now()) {
 		delete(s.sessions, uploadID)
@@ -381,8 +397,9 @@ func (s *Service) Discard(ctx context.Context, uploadID string) error {
 	return nil
 }
 
-// session looks up a live session, evicting an expired one.
-func (s *Service) session(uploadID string) (*sessionState, error) {
+// session looks up a session and enforces its owner before any expiry decision,
+// so another user can never distinguish a live session from an expired one.
+func (s *Service) session(uploadID string, userID int64) (*sessionState, error) {
 	if uploadID == "" {
 		return nil, Fail(ErrNotFound, "unknown upload session")
 	}
@@ -391,6 +408,9 @@ func (s *Service) session(uploadID string) (*sessionState, error) {
 	state, ok := s.sessions[uploadID]
 	if !ok {
 		return nil, Fail(ErrNotFound, "unknown upload session")
+	}
+	if state.ownerUserID != userID {
+		return nil, Fail(ErrForbidden, "upload session belongs to another user")
 	}
 	if expired(state, time.Now()) {
 		delete(s.sessions, uploadID)

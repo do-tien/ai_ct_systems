@@ -45,15 +45,13 @@ func createUser(t *testing.T, q *lc1db.Queries, name string) lc1db.CreateUserRow
 
 func createRead(t *testing.T, q *lc1db.Queries, caseID int64, kind string) lc1db.CreateReadRow {
 	t.Helper()
-	row, err := q.CreateRead(context.Background(), lc1db.CreateReadParams{CaseID: caseID, Kind: kind, Reader: "dr-synthetic"})
+	owner := createUser(t, q, "dr-synthetic")
+	row, err := q.CreateRead(context.Background(), lc1db.CreateReadParams{CaseID: caseID, Kind: kind, ReaderUserID: owner.ID})
 	if err != nil {
 		t.Fatalf("CreateRead: %v", err)
 	}
-	if row.Reader != "dr-synthetic" {
-		t.Fatalf("CreateRead projection = %+v, want reader text", row)
-	}
-	if row.ReaderUserID.Valid || row.ReaderDisplayName.Valid {
-		t.Fatalf("new read unexpectedly carries an owner: %+v", row)
+	if row.ReaderUserID != owner.ID || row.ReaderDisplayName != owner.DisplayName {
+		t.Fatalf("CreateRead projection = %+v, want owner %d/%q", row, owner.ID, owner.DisplayName)
 	}
 	return row
 }
@@ -138,8 +136,8 @@ func TestLC1StorageQueries(t *testing.T) {
 		if err != nil {
 			t.Fatalf("GetRead: %v", err)
 		}
-		if stored.Reader != "dr-synthetic" || stored.ReaderUserID.Valid {
-			t.Fatalf("stored read = %+v, want reader text and no owner", stored)
+		if stored.ReaderUserID != read.ReaderUserID || stored.ReaderDisplayName != read.ReaderDisplayName {
+			t.Fatalf("stored read = %+v, want owner %d", stored, read.ReaderUserID)
 		}
 		marks, err := q.ListMarks(ctx, read.ID)
 		if err != nil {

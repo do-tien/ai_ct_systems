@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+
 	"nodule-reader/backend/internal/application/finalread"
 	"nodule-reader/backend/internal/application/initialread"
 )
@@ -30,24 +32,29 @@ type stubFinalStore struct {
 	replaceCalls  int
 	finalizeCalls int
 	lastReplace   finalread.Replacement
+	lastUserID    int64
 }
 
-func (s *stubFinalStore) GetAI(context.Context, int64, string) (finalread.AI, error) {
+func (s *stubFinalStore) GetAI(_ context.Context, _ int64, userID int64) (finalread.AI, error) {
+	s.lastUserID = userID
 	return s.ai, s.aiErr
 }
 
-func (s *stubFinalStore) GetFinal(context.Context, int64, string) (finalread.Read, error) {
+func (s *stubFinalStore) GetFinal(_ context.Context, _ int64, userID int64) (finalread.Read, error) {
+	s.lastUserID = userID
 	return s.final, s.finalErr
 }
 
-func (s *stubFinalStore) ReplaceFinal(_ context.Context, _ int64, _ string, value finalread.Replacement) (finalread.Read, error) {
+func (s *stubFinalStore) ReplaceFinal(_ context.Context, _ int64, userID int64, value finalread.Replacement) (finalread.Read, error) {
 	s.replaceCalls++
+	s.lastUserID = userID
 	s.lastReplace = value
 	return s.replace, s.replaceErr
 }
 
-func (s *stubFinalStore) Finalize(context.Context, int64, string) (finalread.FinalizeResult, error) {
+func (s *stubFinalStore) Finalize(_ context.Context, _ int64, userID int64) (finalread.FinalizeResult, error) {
 	s.finalizeCalls++
+	s.lastUserID = userID
 	return s.finalized, s.finalizeErr
 }
 
@@ -155,7 +162,7 @@ func TestFinalReadHTTPProjections(t *testing.T) {
 		locked := time.Date(2026, 10, 11, 1, 2, 3, 0, time.UTC)
 		reason := "vessel"
 		store := &stubFinalStore{final: finalread.Read{
-			ID: 7, CaseID: 3, Kind: "final", Reader: "reader", LockedAt: &locked,
+			ID: 7, CaseID: 3, Kind: "final", Reader: "Doctor A", LockedAt: &locked,
 			Marks:              []initialread.Mark{{P1MM: []float64{1, 2, 3}, P2MM: []float64{4, 5, 6}, CenterMM: []float64{2.5, 3.5, 4.5}, DiameterMM: 2, Origin: "reader", ViewPlaneNormal: []float64{0, 0, 1}}},
 			CandidateDecisions: []finalread.Decision{{CandidateID: "c1", Decision: "dismissed", DismissReason: &reason}},
 		}}
@@ -273,7 +280,7 @@ func TestFinalReadHTTPReplacementDecoding(t *testing.T) {
 	valid := `{"marks":[` + validFinalMark + `],"candidate_decisions":[]}`
 
 	t.Run("valid replacement reaches the store", func(t *testing.T) {
-		store := &stubFinalStore{replace: finalread.Read{ID: 1, CaseID: 1, Kind: "final", Reader: "reader"}}
+		store := &stubFinalStore{replace: finalread.Read{ID: 1, CaseID: 1, Kind: "final", Reader: "Doctor A"}}
 		recorder := doFinalRequest(store, http.MethodPut, "/api/cases/1/reads/final", "application/json", strings.NewReader(valid))
 		if recorder.Code != http.StatusOK {
 			t.Fatalf("status = %d (%s)", recorder.Code, recorder.Body.String())
@@ -393,4 +400,99 @@ func errorCode(t *testing.T, recorder *httptest.ResponseRecorder) string {
 		t.Fatalf("decode error envelope %q: %v", recorder.Body.String(), err)
 	}
 	return envelope.Error.Code
+}
+
+// TestFinalReadHandlersForwardPrincipal proves every post-lock use case receives
+// the authenticated user id.
+func TestFinalReadHandlersForwardPrincipal(t *testing.T) {
+	const principalUserID = int64(7) // newFakeAuth's fixed principal.
+
+	check := func(t *testing.T, store *stubFinalStore, recorder *httptest.ResponseRecorder) {
+		t.Helper()
+		if recorder.Code < 200 || recorder.Code >= 300 {
+			t.Fatalf("status = %d (%s)", recorder.Code, recorder.Body.String())
+		}
+		if store.lastUserID != principalUserID {
+			t.Fatalf("user = %d, want %d", store.lastUserID, principalUserID)
+		}
+	}
+
+	t.Run("get ai", func(t *testing.T) {
+		store := &stubFinalStore{ai: finalread.AI{Status: finalread.AIQueued}}
+		recorder := doFinalRequest(store, http.MethodGet, "/api/cases/1/ai", "", nil)
+		check(t, store, recorder)
+	})
+	t.Run("get final", func(t *testing.T) {
+		store := &stubFinalStore{final: finalread.Read{ID: 1, CaseID: 1, Kind: "final", Marks: []initialread.Mark{}, CandidateDecisions: []finalread.Decision{}}}
+		recorder := doFinalRequest(store, http.MethodGet, "/api/cases/1/reads/final", "", nil)
+		check(t, store, recorder)
+	})
+	t.Run("replace final", func(t *testing.T) {
+		store := &stubFinalStore{replace: finalread.Read{ID: 1, CaseID: 1, Kind: "final", Marks: []initialread.Mark{}, CandidateDecisions: []finalread.Decision{}}}
+		recorder := doFinalRequest(store, http.MethodPut, "/api/cases/1/reads/final", "application/json", strings.NewReader(`{"marks":[],"candidate_decisions":[]}`))
+		check(t, store, recorder)
+	})
+	t.Run("finalize", func(t *testing.T) {
+		store := &stubFinalStore{}
+		recorder := doFinalRequest(store, http.MethodPost, "/api/cases/1/finalize", "", strings.NewReader(""))
+		check(t, store, recorder)
+	})
+}
+
+// TestFinalReadHandlersRequirePrincipal proves the post-lock handlers fail closed
+// when mounted without the session middleware.
+func TestFinalReadHandlersRequirePrincipal(t *testing.T) {
+	handler := &finalReadHandler{service: finalread.NewService(&stubFinalStore{})}
+	router := chi.NewRouter()
+	router.Get("/api/cases/{id}/ai", handler.getAI)
+	router.Get("/api/cases/{id}/reads/final", handler.getFinal)
+	router.Put("/api/cases/{id}/reads/final", handler.putFinal)
+	router.Post("/api/cases/{id}/finalize", handler.finalize)
+	cases := []struct {
+		method string
+		target string
+	}{
+		{http.MethodGet, "/api/cases/1/ai"},
+		{http.MethodGet, "/api/cases/1/reads/final"},
+		{http.MethodPut, "/api/cases/1/reads/final"},
+		{http.MethodPost, "/api/cases/1/finalize"},
+	}
+	for _, test := range cases {
+		t.Run(test.method+" "+test.target, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			router.ServeHTTP(recorder, httptest.NewRequest(test.method, test.target, nil))
+			if recorder.Code != http.StatusUnauthorized {
+				t.Fatalf("status = %d, want 401", recorder.Code)
+			}
+			if code, _ := decodeAPIError(t, recorder); code != codeAuthRequired {
+				t.Fatalf("code = %q, want %s", code, codeAuthRequired)
+			}
+		})
+	}
+}
+
+// TestFinalReadAssignedMapping keeps pre-lock ErrForbidden and ownership
+// mismatch distinct, and never exposes the owner.
+func TestFinalReadAssignedMapping(t *testing.T) {
+	t.Run("pre-lock stays initial-read-required", func(t *testing.T) {
+		store := &stubFinalStore{aiErr: finalread.ErrForbidden}
+		recorder := doFinalRequest(store, http.MethodGet, "/api/cases/1/ai", "", nil)
+		if recorder.Code != http.StatusForbidden {
+			t.Fatalf("status = %d, want 403", recorder.Code)
+		}
+		if code := errorCode(t, recorder); code != "INITIAL_READ_REQUIRED" {
+			t.Fatalf("code = %q", code)
+		}
+	})
+	t.Run("another owner", func(t *testing.T) {
+		store := &stubFinalStore{aiErr: finalread.ErrAssignedToAnotherUser}
+		recorder := doFinalRequest(store, http.MethodGet, "/api/cases/1/ai", "", nil)
+		if recorder.Code != http.StatusForbidden {
+			t.Fatalf("status = %d, want 403", recorder.Code)
+		}
+		code, message := decodeAPIError(t, recorder)
+		if code != "CASE_ASSIGNED_TO_ANOTHER_USER" || message != apiErrorMessages[code] {
+			t.Fatalf("error = %q/%q", code, message)
+		}
+	})
 }

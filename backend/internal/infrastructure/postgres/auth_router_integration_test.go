@@ -13,18 +13,24 @@ import (
 // so they inject a fixed principal instead of creating database sessions.
 const integrationSessionToken = "integration-session-token"
 
-type integrationAuthService struct{}
+// integrationAuthService returns the seeded caller as the authenticated
+// principal. Tests always set both fields to a real users row so ownership checks
+// run against the database rather than a global id.
+type integrationAuthService struct {
+	userID      int64
+	displayName string
+}
 
 func (integrationAuthService) Login(context.Context, string, string, time.Time) (string, auth.Session, error) {
 	return "", auth.Session{}, auth.ErrInvalidCredentials
 }
 
-func (integrationAuthService) Authenticate(_ context.Context, rawToken string, now time.Time) (auth.Session, error) {
+func (s integrationAuthService) Authenticate(_ context.Context, rawToken string, now time.Time) (auth.Session, error) {
 	if rawToken != integrationSessionToken {
 		return auth.Session{}, auth.ErrInvalidCredentials
 	}
 	return auth.Session{
-		User:      auth.User{ID: 1, DisplayName: "Integration reader"},
+		User:      auth.User{ID: s.userID, DisplayName: s.displayName},
 		ExpiresAt: now.Add(auth.SessionTTL),
 	}, nil
 }

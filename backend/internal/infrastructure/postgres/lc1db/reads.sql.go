@@ -13,42 +13,40 @@ import (
 
 const createRead = `-- name: CreateRead :one
 WITH created AS (
-    INSERT INTO reads (case_id, kind, reader)
+    INSERT INTO reads (case_id, kind, reader_user_id)
     VALUES ($1, $2, $3)
-    RETURNING id, case_id, kind, reader, locked_at, created_at, reader_user_id
+    RETURNING id, case_id, kind, locked_at, created_at, reader_user_id
 )
-SELECT created.id, created.case_id, created.kind, created.reader,
+SELECT created.id, created.case_id, created.kind,
        created.locked_at, created.created_at, created.reader_user_id,
        users.display_name AS reader_display_name
 FROM created
-LEFT JOIN users ON users.id = created.reader_user_id
+JOIN users ON users.id = created.reader_user_id
 `
 
 type CreateReadParams struct {
-	CaseID int64
-	Kind   string
-	Reader string
+	CaseID       int64
+	Kind         string
+	ReaderUserID int64
 }
 
 type CreateReadRow struct {
 	ID                int64
 	CaseID            int64
 	Kind              string
-	Reader            string
 	LockedAt          pgtype.Timestamptz
 	CreatedAt         pgtype.Timestamptz
-	ReaderUserID      pgtype.Int8
-	ReaderDisplayName pgtype.Text
+	ReaderUserID      int64
+	ReaderDisplayName string
 }
 
 func (q *Queries) CreateRead(ctx context.Context, arg CreateReadParams) (CreateReadRow, error) {
-	row := q.db.QueryRow(ctx, createRead, arg.CaseID, arg.Kind, arg.Reader)
+	row := q.db.QueryRow(ctx, createRead, arg.CaseID, arg.Kind, arg.ReaderUserID)
 	var i CreateReadRow
 	err := row.Scan(
 		&i.ID,
 		&i.CaseID,
 		&i.Kind,
-		&i.Reader,
 		&i.LockedAt,
 		&i.CreatedAt,
 		&i.ReaderUserID,
@@ -58,10 +56,10 @@ func (q *Queries) CreateRead(ctx context.Context, arg CreateReadParams) (CreateR
 }
 
 const getRead = `-- name: GetRead :one
-SELECT r.id, r.case_id, r.kind, r.reader, r.locked_at, r.created_at, r.reader_user_id,
+SELECT r.id, r.case_id, r.kind, r.locked_at, r.created_at, r.reader_user_id,
        u.display_name AS reader_display_name
 FROM reads r
-LEFT JOIN users u ON u.id = r.reader_user_id
+JOIN users u ON u.id = r.reader_user_id
 WHERE r.case_id = $1 AND r.kind = $2
 `
 
@@ -74,11 +72,10 @@ type GetReadRow struct {
 	ID                int64
 	CaseID            int64
 	Kind              string
-	Reader            string
 	LockedAt          pgtype.Timestamptz
 	CreatedAt         pgtype.Timestamptz
-	ReaderUserID      pgtype.Int8
-	ReaderDisplayName pgtype.Text
+	ReaderUserID      int64
+	ReaderDisplayName string
 }
 
 func (q *Queries) GetRead(ctx context.Context, arg GetReadParams) (GetReadRow, error) {
@@ -88,7 +85,6 @@ func (q *Queries) GetRead(ctx context.Context, arg GetReadParams) (GetReadRow, e
 		&i.ID,
 		&i.CaseID,
 		&i.Kind,
-		&i.Reader,
 		&i.LockedAt,
 		&i.CreatedAt,
 		&i.ReaderUserID,
@@ -98,10 +94,10 @@ func (q *Queries) GetRead(ctx context.Context, arg GetReadParams) (GetReadRow, e
 }
 
 const getReadForUpdate = `-- name: GetReadForUpdate :one
-SELECT r.id, r.case_id, r.kind, r.reader, r.locked_at, r.created_at, r.reader_user_id,
+SELECT r.id, r.case_id, r.kind, r.locked_at, r.created_at, r.reader_user_id,
        u.display_name AS reader_display_name
 FROM reads r
-LEFT JOIN users u ON u.id = r.reader_user_id
+JOIN users u ON u.id = r.reader_user_id
 WHERE r.case_id = $1 AND r.kind = $2
 FOR UPDATE OF r
 `
@@ -115,11 +111,10 @@ type GetReadForUpdateRow struct {
 	ID                int64
 	CaseID            int64
 	Kind              string
-	Reader            string
 	LockedAt          pgtype.Timestamptz
 	CreatedAt         pgtype.Timestamptz
-	ReaderUserID      pgtype.Int8
-	ReaderDisplayName pgtype.Text
+	ReaderUserID      int64
+	ReaderDisplayName string
 }
 
 func (q *Queries) GetReadForUpdate(ctx context.Context, arg GetReadForUpdateParams) (GetReadForUpdateRow, error) {
@@ -129,7 +124,6 @@ func (q *Queries) GetReadForUpdate(ctx context.Context, arg GetReadForUpdatePara
 		&i.ID,
 		&i.CaseID,
 		&i.Kind,
-		&i.Reader,
 		&i.LockedAt,
 		&i.CreatedAt,
 		&i.ReaderUserID,
@@ -143,24 +137,23 @@ WITH locked AS (
     UPDATE reads
     SET locked_at = now()
     WHERE reads.id = $1 AND reads.locked_at IS NULL
-    RETURNING id, case_id, kind, reader, locked_at, created_at, reader_user_id
+    RETURNING id, case_id, kind, locked_at, created_at, reader_user_id
 )
-SELECT locked.id, locked.case_id, locked.kind, locked.reader,
+SELECT locked.id, locked.case_id, locked.kind,
        locked.locked_at, locked.created_at, locked.reader_user_id,
        users.display_name AS reader_display_name
 FROM locked
-LEFT JOIN users ON users.id = locked.reader_user_id
+JOIN users ON users.id = locked.reader_user_id
 `
 
 type LockReadRow struct {
 	ID                int64
 	CaseID            int64
 	Kind              string
-	Reader            string
 	LockedAt          pgtype.Timestamptz
 	CreatedAt         pgtype.Timestamptz
-	ReaderUserID      pgtype.Int8
-	ReaderDisplayName pgtype.Text
+	ReaderUserID      int64
+	ReaderDisplayName string
 }
 
 func (q *Queries) LockRead(ctx context.Context, id int64) (LockReadRow, error) {
@@ -170,7 +163,6 @@ func (q *Queries) LockRead(ctx context.Context, id int64) (LockReadRow, error) {
 		&i.ID,
 		&i.CaseID,
 		&i.Kind,
-		&i.Reader,
 		&i.LockedAt,
 		&i.CreatedAt,
 		&i.ReaderUserID,

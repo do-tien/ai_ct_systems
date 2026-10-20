@@ -53,9 +53,10 @@ CREATE INDEX reads_reader_user_id_idx ON reads (reader_user_id);
 
 -- +goose Down
 -- reads.reader was never removed, so rollback only removes the new ownership
--- column and the user/session tables.
+-- column and the user/session tables. 00005 already drops reader_user_id on its
+-- own down, so this must tolerate its absence.
 ALTER TABLE events DROP COLUMN actor_user_id;
-ALTER TABLE reads DROP COLUMN reader_user_id;
+ALTER TABLE reads DROP COLUMN IF EXISTS reader_user_id;
 
 DROP TABLE auth_sessions;
 DROP TABLE users;

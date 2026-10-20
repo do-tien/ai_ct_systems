@@ -429,16 +429,17 @@ func TestAIJobTerminalWritesLeavePhysicianDataUnchanged(t *testing.T) {
 	store, pool := jobStore(t, h)
 	ctx := context.Background()
 
+	ownerID := readerUserID(t, pool)
 	caseID := seedCase(t, pool, "1.2.3.4.5.250", "awaiting_read")
 	var initialRead, finalRead int64
 	if err := pool.QueryRow(ctx,
-		`INSERT INTO reads (case_id, kind, reader) VALUES ($1, 'initial', 'reader') RETURNING id`,
-		caseID).Scan(&initialRead); err != nil {
+		`INSERT INTO reads (case_id, kind, reader_user_id) VALUES ($1, 'initial', $2) RETURNING id`,
+		caseID, ownerID).Scan(&initialRead); err != nil {
 		t.Fatalf("seed initial read: %v", err)
 	}
 	if err := pool.QueryRow(ctx,
-		`INSERT INTO reads (case_id, kind, reader) VALUES ($1, 'final', 'reader') RETURNING id`,
-		caseID).Scan(&finalRead); err != nil {
+		`INSERT INTO reads (case_id, kind, reader_user_id) VALUES ($1, 'final', $2) RETURNING id`,
+		caseID, ownerID).Scan(&finalRead); err != nil {
 		t.Fatalf("seed final read: %v", err)
 	}
 	initialMark, initialMarkArgs := markInsert(initialRead, validTripleA, validTripleB, validCenter, "17.0", "'reader'", "NULL", "'{0,0,1}'::float8[]")

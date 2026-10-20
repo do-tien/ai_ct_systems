@@ -7,6 +7,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"nodule-reader/backend/internal/application/caseimport"
@@ -15,7 +16,7 @@ import (
 
 // importInput is one synthetic validated import. Series UIDs are unique per
 // test so no real identifier ever reaches the database.
-func importInput(seriesUID, studyUID, source string) caseimport.ImportedCase {
+func importInput(userID int64, seriesUID, studyUID, source string) caseimport.ImportedCase {
 	return caseimport.ImportedCase{
 		Source:              source,
 		StudyInstanceUID:    studyUID,
@@ -23,6 +24,8 @@ func importInput(seriesUID, studyUID, source string) caseimport.ImportedCase {
 		OrthancSeriesID:     "11111111-22222222-33333333-44444444-55555555",
 		FrameOfReferenceUID: "1.2.840.113619.2.55.3.604688.100.3",
 		InstanceCount:       158,
+		ActorUserID:         userID,
+		ActorDisplayName:    integrationReaderName,
 	}
 }
 
@@ -56,7 +59,7 @@ func TestImportStoreAtomic(t *testing.T) {
 	store := postgres.NewImportStore(pool)
 	ctx := context.Background()
 
-	input := importInput("1.2.3.4.5.100", "1.2.3.4.5.99", "LIDC-IDRI")
+	input := importInput(readerUserID(t, pool), "1.2.3.4.5.100", "1.2.3.4.5.99", "LIDC-IDRI")
 	caseID, err := store.CreateImportedCase(ctx, input)
 	if err != nil {
 		t.Fatalf("CreateImportedCase: %v", err)
@@ -94,13 +97,14 @@ func TestImportStoreAtomic(t *testing.T) {
 		t.Fatalf("events = %d, want 1", got)
 	}
 	var actor, action string
+	var actorID pgtype.Int8
 	var detail []byte
 	if err := pool.QueryRow(ctx,
-		`SELECT actor, action, detail FROM events WHERE case_id = $1`, caseID).Scan(&actor, &action, &detail); err != nil {
+		`SELECT actor, action, detail, actor_user_id FROM events WHERE case_id = $1`, caseID).Scan(&actor, &action, &detail, &actorID); err != nil {
 		t.Fatalf("read event: %v", err)
 	}
-	if actor != "importer" || action != "case_imported" {
-		t.Fatalf("event = %q/%q", actor, action)
+	if actor != integrationReaderName || action != "case_imported" || !actorID.Valid || actorID.Int64 != input.ActorUserID {
+		t.Fatalf("event = %q/%q/%+v, want %q/%d", actor, action, actorID, integrationReaderName, input.ActorUserID)
 	}
 	var decoded struct {
 		InstanceCount int `json:"instance_count"`
@@ -127,13 +131,13 @@ func TestImportStoreDuplicate(t *testing.T) {
 	store := postgres.NewImportStore(pool)
 	ctx := context.Background()
 
-	first := importInput("1.2.3.4.5.200", "1.2.3.4.5.99", "LIDC-IDRI")
+	first := importInput(readerUserID(t, pool), "1.2.3.4.5.200", "1.2.3.4.5.99", "LIDC-IDRI")
 	caseID, err := store.CreateImportedCase(ctx, first)
 	if err != nil {
 		t.Fatalf("first import: %v", err)
 	}
 
-	second := importInput("1.2.3.4.5.200", "1.2.3.4.5.99", "local")
+	second := importInput(readerUserID(t, pool), "1.2.3.4.5.200", "1.2.3.4.5.99", "local")
 	_, err = store.CreateImportedCase(ctx, second)
 	if !errors.Is(err, caseimport.ErrDuplicateSeries) {
 		t.Fatalf("second import error = %v, want %v", err, caseimport.ErrDuplicateSeries)
@@ -165,7 +169,7 @@ func TestImportStoreConcurrent(t *testing.T) {
 	store := postgres.NewImportStore(pool)
 	ctx := context.Background()
 
-	input := importInput("1.2.3.4.5.300", "1.2.3.4.5.99", "LIDC-IDRI")
+	input := importInput(readerUserID(t, pool), "1.2.3.4.5.300", "1.2.3.4.5.99", "LIDC-IDRI")
 
 	var wg sync.WaitGroup
 	results := make([]error, 2)
@@ -251,7 +255,7 @@ func TestImportStoreRollback(t *testing.T) {
 				t.Fatalf("grant fixture: %v", err)
 			}
 
-			input := importInput(fixture.seriesUID, "1.2.3.4.5.99", "local")
+			input := importInput(readerUserID(t, pool), fixture.seriesUID, "1.2.3.4.5.99", "local")
 			_, err := store.CreateImportedCase(ctx, input)
 			if !errors.Is(err, caseimport.ErrDependency) {
 				t.Fatalf("error = %v, want %v", err, caseimport.ErrDependency)
@@ -279,7 +283,7 @@ func TestImportStoreCanceled(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	_, err := store.CreateImportedCase(ctx, importInput("1.2.3.4.5.600", "1.2.3.4.5.99", "local"))
+	_, err := store.CreateImportedCase(ctx, importInput(readerUserID(t, pool), "1.2.3.4.5.600", "1.2.3.4.5.99", "local"))
 	if !errors.Is(err, caseimport.ErrCanceled) {
 		t.Fatalf("error = %v, want %v", err, caseimport.ErrCanceled)
 	}
@@ -347,7 +351,7 @@ func TestImportStoreCommitOutcome(t *testing.T) {
 				t.Fatalf("grant fixture: %v", err)
 			}
 
-			input := importInput(fixture.seriesUID, "1.2.3.4.5.99", "local")
+			input := importInput(readerUserID(t, pool), fixture.seriesUID, "1.2.3.4.5.99", "local")
 			_, err := store.CreateImportedCase(ctx, input)
 			if !errors.Is(err, fixture.wantErr) {
 				t.Fatalf("error = %v, want %v", err, fixture.wantErr)

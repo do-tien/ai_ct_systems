@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+
 	"nodule-reader/backend/internal/application/initialread"
 )
 
@@ -35,6 +37,7 @@ type stubInitialStore struct {
 	replaceCalls int
 	submitCalls  int
 	lastCaseID   int64
+	lastUserID   int64
 	lastMarks    []initialread.Mark
 }
 
@@ -44,15 +47,17 @@ func (s *stubInitialStore) GetCase(_ context.Context, caseID int64) (initialread
 	return s.caseResult, s.caseErr
 }
 
-func (s *stubInitialStore) GetOrCreateInitial(_ context.Context, caseID int64, _ string) (initialread.Read, error) {
+func (s *stubInitialStore) GetOrCreateInitial(_ context.Context, caseID, userID int64) (initialread.Read, error) {
 	s.readCalls++
 	s.lastCaseID = caseID
+	s.lastUserID = userID
 	return s.readResult, s.readErr
 }
 
-func (s *stubInitialStore) ReplaceInitialMarks(_ context.Context, caseID int64, _ string, marks []initialread.Mark) ([]initialread.Mark, error) {
+func (s *stubInitialStore) ReplaceInitialMarks(_ context.Context, caseID, userID int64, marks []initialread.Mark) ([]initialread.Mark, error) {
 	s.replaceCalls++
 	s.lastCaseID = caseID
+	s.lastUserID = userID
 	s.lastMarks = marks
 	if s.savedResult != nil {
 		return s.savedResult, s.replaceErr
@@ -60,9 +65,10 @@ func (s *stubInitialStore) ReplaceInitialMarks(_ context.Context, caseID int64, 
 	return marks, s.replaceErr
 }
 
-func (s *stubInitialStore) SubmitInitial(_ context.Context, caseID int64, _ string) (initialread.SubmitResult, error) {
+func (s *stubInitialStore) SubmitInitial(_ context.Context, caseID, userID int64) (initialread.SubmitResult, error) {
 	s.submitCalls++
 	s.lastCaseID = caseID
+	s.lastUserID = userID
 	return s.submitResult, s.submitErr
 }
 
@@ -186,7 +192,7 @@ func TestInitialReadAPIGetInitial(t *testing.T) {
 	locked := time.Date(2026, 10, 10, 9, 0, 0, 0, time.UTC)
 	t.Run("with marks", func(t *testing.T) {
 		store := &stubInitialStore{readResult: initialread.Read{
-			ID: 11, CaseID: 5, Kind: "initial", Reader: "reader", Marks: []initialread.Mark{measuredMark()},
+			ID: 11, CaseID: 5, Kind: "initial", Reader: "Doctor A", Marks: []initialread.Mark{measuredMark()},
 		}}
 		recorder := doInitialRequest(store, http.MethodGet, "/api/cases/5/reads/initial", "", nil)
 		if recorder.Code != http.StatusOK {
@@ -204,7 +210,7 @@ func TestInitialReadAPIGetInitial(t *testing.T) {
 		if err := json.Unmarshal(recorder.Body.Bytes(), &read); err != nil {
 			t.Fatalf("read body: %v", err)
 		}
-		if read.Kind != "initial" || read.Reader != "reader" || read.LockedAt != nil {
+		if read.Kind != "initial" || read.Reader != "Doctor A" || read.LockedAt != nil {
 			t.Fatalf("read = %+v", read)
 		}
 		if len(read.Marks) != 1 {
@@ -217,7 +223,7 @@ func TestInitialReadAPIGetInitial(t *testing.T) {
 
 	t.Run("locked read keeps its timestamp", func(t *testing.T) {
 		store := &stubInitialStore{readResult: initialread.Read{
-			ID: 11, CaseID: 5, Kind: "initial", Reader: "reader", LockedAt: &locked, Marks: []initialread.Mark{},
+			ID: 11, CaseID: 5, Kind: "initial", Reader: "Doctor A", LockedAt: &locked, Marks: []initialread.Mark{},
 		}}
 		recorder := doInitialRequest(store, http.MethodGet, "/api/cases/5/reads/initial", "", nil)
 		if recorder.Code != http.StatusOK {
@@ -635,4 +641,88 @@ func TestInitialSubmitHTTP(t *testing.T) {
 			t.Fatalf("status = %d, want 200 (%s)", recorder.Code, recorder.Body.String())
 		}
 	})
+}
+
+// TestInitialReadHandlersForwardPrincipal proves every use case receives the
+// authenticated user id, never a fixed reader identity.
+func TestInitialReadHandlersForwardPrincipal(t *testing.T) {
+	const principalUserID = int64(7) // newFakeAuth's fixed principal.
+
+	t.Run("get initial", func(t *testing.T) {
+		store := &stubInitialStore{}
+		recorder := doInitialRequest(store, http.MethodGet, "/api/cases/5/reads/initial", "", nil)
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("status = %d", recorder.Code)
+		}
+		if store.lastUserID != principalUserID {
+			t.Fatalf("user = %d, want %d", store.lastUserID, principalUserID)
+		}
+	})
+
+	t.Run("replace marks", func(t *testing.T) {
+		store := &stubInitialStore{}
+		recorder := doInitialRequest(store, http.MethodPut, "/api/cases/5/reads/initial/marks", "application/json", strings.NewReader(`{"marks":[]}`))
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("status = %d (%s)", recorder.Code, recorder.Body.String())
+		}
+		if store.lastUserID != principalUserID {
+			t.Fatalf("user = %d, want %d", store.lastUserID, principalUserID)
+		}
+	})
+
+	t.Run("submit", func(t *testing.T) {
+		store := &stubInitialStore{}
+		recorder := doInitialRequest(store, http.MethodPost, "/api/cases/5/reads/initial/submit", "", nil)
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("status = %d", recorder.Code)
+		}
+		if store.lastUserID != principalUserID {
+			t.Fatalf("user = %d, want %d", store.lastUserID, principalUserID)
+		}
+	})
+}
+
+// TestInitialReadHandlersRequirePrincipal proves a handler mounted without the
+// session middleware fails closed instead of trusting a zero user id.
+func TestInitialReadHandlersRequirePrincipal(t *testing.T) {
+	handler := &initialReadHandler{service: initialread.NewService(&stubInitialStore{})}
+	router := chi.NewRouter()
+	router.Get("/api/cases/{id}", handler.getCase)
+	router.Get("/api/cases/{id}/reads/initial", handler.getInitial)
+	router.Put("/api/cases/{id}/reads/initial/marks", handler.putMarks)
+	router.Post("/api/cases/{id}/reads/initial/submit", handler.submit)
+	cases := []struct {
+		method string
+		target string
+	}{
+		{http.MethodGet, "/api/cases/5"},
+		{http.MethodGet, "/api/cases/5/reads/initial"},
+		{http.MethodPut, "/api/cases/5/reads/initial/marks"},
+		{http.MethodPost, "/api/cases/5/reads/initial/submit"},
+	}
+	for _, test := range cases {
+		t.Run(test.method+" "+test.target, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			router.ServeHTTP(recorder, httptest.NewRequest(test.method, test.target, nil))
+			if recorder.Code != http.StatusUnauthorized {
+				t.Fatalf("status = %d, want 401", recorder.Code)
+			}
+			if code, _ := decodeAPIError(t, recorder); code != codeAuthRequired {
+				t.Fatalf("code = %q, want %s", code, codeAuthRequired)
+			}
+		})
+	}
+}
+
+// TestInitialReadForbiddenMapping proves another owner's case maps to the fixed
+// 403 without describing the owner.
+func TestInitialReadForbiddenMapping(t *testing.T) {
+	store := &stubInitialStore{readErr: initialread.ErrForbidden}
+	recorder := doInitialRequest(store, http.MethodGet, "/api/cases/5/reads/initial", "", nil)
+	if recorder.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", recorder.Code)
+	}
+	if code, message := decodeAPIError(t, recorder); code != "CASE_ASSIGNED_TO_ANOTHER_USER" || message != apiErrorMessages[code] {
+		t.Fatalf("error = %q/%q", code, message)
+	}
 }

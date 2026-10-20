@@ -31,6 +31,9 @@ const (
 	codeInvalidCredentials  = "INVALID_CREDENTIALS"
 	codeTooManyAttempts     = "TOO_MANY_ATTEMPTS"
 	codeOriginNotAllowed    = "ORIGIN_NOT_ALLOWED"
+	// codeCaseAssigned is used when another authenticated user owns the case's
+	// read. It never names or describes that user.
+	codeCaseAssigned = "CASE_ASSIGNED_TO_ANOTHER_USER"
 )
 
 // maxMarksBodyBytes bounds one marks replacement body.
@@ -53,6 +56,7 @@ var apiErrorMessages = map[string]string{
 	codeInvalidCredentials:  "credentials are invalid",
 	codeTooManyAttempts:     "too many authentication attempts; retry later",
 	codeOriginNotAllowed:    "request origin is not allowed",
+	codeCaseAssigned:        "the case is assigned to another user",
 }
 
 type apiErrorEnvelope struct {
@@ -136,6 +140,9 @@ func (h *initialReadHandler) getCase(writer http.ResponseWriter, request *http.R
 		writeAPIErrorStatus(writer, http.StatusBadRequest, codeInvalidRequest)
 		return
 	}
+	if _, ok := requirePrincipal(writer, request); !ok {
+		return
+	}
 	value, err := h.service.GetCase(request.Context(), caseID)
 	if err != nil {
 		writeAPIError(writer, err)
@@ -159,7 +166,11 @@ func (h *initialReadHandler) getInitial(writer http.ResponseWriter, request *htt
 		writeAPIErrorStatus(writer, http.StatusBadRequest, codeInvalidRequest)
 		return
 	}
-	read, err := h.service.GetInitial(request.Context(), caseID)
+	principal, ok := requirePrincipal(writer, request)
+	if !ok {
+		return
+	}
+	read, err := h.service.GetInitial(request.Context(), caseID, principal.UserID)
 	if err != nil {
 		writeAPIError(writer, err)
 		return
@@ -178,6 +189,10 @@ func (h *initialReadHandler) putMarks(writer http.ResponseWriter, request *http.
 	caseID, ok := caseIDFromRequest(request)
 	if !ok {
 		writeAPIErrorStatus(writer, http.StatusBadRequest, codeInvalidRequest)
+		return
+	}
+	principal, ok := requirePrincipal(writer, request)
+	if !ok {
 		return
 	}
 	if !isJSONContentType(request.Header.Get("Content-Type")) {
@@ -213,7 +228,7 @@ func (h *initialReadHandler) putMarks(writer http.ResponseWriter, request *http.
 		return
 	}
 
-	saved, err := h.service.ReplaceMarks(request.Context(), caseID, marks)
+	saved, err := h.service.ReplaceMarks(request.Context(), caseID, principal.UserID, marks)
 	if err != nil {
 		writeAPIError(writer, err)
 		return
@@ -229,13 +244,17 @@ func (h *initialReadHandler) submit(writer http.ResponseWriter, request *http.Re
 		writeAPIErrorStatus(writer, http.StatusBadRequest, codeInvalidRequest)
 		return
 	}
+	principal, ok := requirePrincipal(writer, request)
+	if !ok {
+		return
+	}
 	bodyEmpty, err := requestBodyEmpty(request)
 	if err != nil || !bodyEmpty {
 		writeAPIErrorStatus(writer, http.StatusBadRequest, codeInvalidRequest)
 		return
 	}
 
-	result, err := h.service.SubmitInitial(request.Context(), caseID)
+	result, err := h.service.SubmitInitial(request.Context(), caseID, principal.UserID)
 	if err != nil {
 		writeAPIError(writer, err)
 		return
@@ -363,6 +382,8 @@ func writeAPIError(writer http.ResponseWriter, err error) {
 		writeAPIErrorStatus(writer, http.StatusConflict, codeInitialReadLocked)
 	case errors.Is(err, initialread.ErrConflict):
 		writeAPIErrorStatus(writer, http.StatusConflict, codeInitialReadConflict)
+	case errors.Is(err, initialread.ErrForbidden):
+		writeAPIErrorStatus(writer, http.StatusForbidden, codeCaseAssigned)
 	case errors.Is(err, initialread.ErrCommitOutcomeUnknown):
 		writeAPIErrorStatus(writer, http.StatusServiceUnavailable, codeCommitUnknown)
 	case errors.Is(err, initialread.ErrDependency):

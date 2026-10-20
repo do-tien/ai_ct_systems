@@ -20,7 +20,7 @@ func TestImportStoreFindsCaseBySeriesUID(t *testing.T) {
 	store := postgres.NewImportStore(pool)
 	ctx := context.Background()
 
-	input := importInput("1.2.3.4.5.200", "1.2.3.4.5.199", "upload")
+	input := importInput(readerUserID(t, pool), "1.2.3.4.5.200", "1.2.3.4.5.199", "upload")
 	caseID, err := store.CreateImportedCase(ctx, input)
 	if err != nil {
 		t.Fatalf("create imported case: %v", err)

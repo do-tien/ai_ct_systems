@@ -28,6 +28,18 @@ func PrincipalFromContext(ctx context.Context) (auth.Principal, bool) {
 	return principal, ok
 }
 
+// requirePrincipal is the defense-in-depth check every clinical handler runs
+// before touching a use case. The session middleware already rejects missing
+// sessions; this makes a handler mounted without that middleware fail closed.
+func requirePrincipal(writer http.ResponseWriter, request *http.Request) (auth.Principal, bool) {
+	principal, ok := PrincipalFromContext(request.Context())
+	if !ok {
+		writeAPIErrorStatus(writer, http.StatusUnauthorized, codeAuthRequired)
+		return auth.Principal{}, false
+	}
+	return principal, true
+}
+
 // authService is the transport-owned minimal authentication dependency. The
 // composition root injects *auth.Service; tests inject a fake without creating
 // database sessions.

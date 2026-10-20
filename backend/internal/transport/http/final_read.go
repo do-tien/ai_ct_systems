@@ -121,7 +121,11 @@ func (h *finalReadHandler) getAI(writer http.ResponseWriter, request *http.Reque
 		writeAPIErrorStatus(writer, http.StatusBadRequest, codeInvalidRequest)
 		return
 	}
-	value, err := h.service.GetAI(request.Context(), caseID)
+	principal, ok := requirePrincipal(writer, request)
+	if !ok {
+		return
+	}
+	value, err := h.service.GetAI(request.Context(), caseID, principal.UserID)
 	if err != nil {
 		writeFinalReadError(writer, err)
 		return
@@ -135,7 +139,11 @@ func (h *finalReadHandler) getFinal(writer http.ResponseWriter, request *http.Re
 		writeAPIErrorStatus(writer, http.StatusBadRequest, codeInvalidRequest)
 		return
 	}
-	read, err := h.service.GetFinal(request.Context(), caseID)
+	principal, ok := requirePrincipal(writer, request)
+	if !ok {
+		return
+	}
+	read, err := h.service.GetFinal(request.Context(), caseID, principal.UserID)
 	if err != nil {
 		writeFinalReadError(writer, err)
 		return
@@ -154,7 +162,12 @@ func (h *finalReadHandler) putFinal(writer http.ResponseWriter, request *http.Re
 		return
 	}
 
-	preflight, err := h.service.GetFinal(request.Context(), caseID)
+	principal, ok := requirePrincipal(writer, request)
+	if !ok {
+		return
+	}
+
+	preflight, err := h.service.GetFinal(request.Context(), caseID, principal.UserID)
 	if err != nil {
 		writeFinalReadError(writer, err)
 		return
@@ -196,7 +209,7 @@ func (h *finalReadHandler) putFinal(writer http.ResponseWriter, request *http.Re
 		return
 	}
 
-	read, err := h.service.ReplaceFinal(request.Context(), caseID, replacement)
+	read, err := h.service.ReplaceFinal(request.Context(), caseID, principal.UserID, replacement)
 	if err != nil {
 		writeFinalReadError(writer, err)
 		return
@@ -212,13 +225,17 @@ func (h *finalReadHandler) finalize(writer http.ResponseWriter, request *http.Re
 		writeAPIErrorStatus(writer, http.StatusBadRequest, codeInvalidRequest)
 		return
 	}
+	principal, ok := requirePrincipal(writer, request)
+	if !ok {
+		return
+	}
 	bodyEmpty, err := requestBodyEmpty(request)
 	if err != nil || !bodyEmpty {
 		writeAPIErrorStatus(writer, http.StatusBadRequest, codeInvalidRequest)
 		return
 	}
 
-	result, err := h.service.Finalize(request.Context(), caseID)
+	result, err := h.service.Finalize(request.Context(), caseID, principal.UserID)
 	if err != nil {
 		writeFinalReadError(writer, err)
 		return
@@ -370,6 +387,8 @@ func writeFinalReadError(writer http.ResponseWriter, err error) {
 		writeAPIErrorStatus(writer, http.StatusNotFound, codeCaseNotFound)
 	case errors.Is(err, finalread.ErrForbidden):
 		writeAPIErrorStatus(writer, http.StatusForbidden, codeInitialReadRequired)
+	case errors.Is(err, finalread.ErrAssignedToAnotherUser):
+		writeAPIErrorStatus(writer, http.StatusForbidden, codeCaseAssigned)
 	case errors.Is(err, finalread.ErrLocked):
 		writeAPIErrorStatus(writer, http.StatusConflict, codeFinalReadLocked)
 	case errors.Is(err, finalread.ErrConflict):

@@ -35,8 +35,8 @@ func seedLockedCase(t *testing.T, pool *pgxpool.Pool, seriesUID string) (caseID,
 		t.Fatalf("lock initial read: %v", err)
 	}
 	if err := pool.QueryRow(ctx,
-		`INSERT INTO reads (case_id, kind, reader) VALUES ($1, 'final', $2) RETURNING id`,
-		caseID, initialread.Reader).Scan(&finalID); err != nil {
+		`INSERT INTO reads (case_id, kind, reader_user_id) VALUES ($1, 'final', $2) RETURNING id`,
+		caseID, readerUserID(t, pool)).Scan(&finalID); err != nil {
 		t.Fatalf("seed final read: %v", err)
 	}
 	if _, err := pool.Exec(ctx, `UPDATE cases SET status = 'initial_locked' WHERE id = $1`, caseID); err != nil {
@@ -176,10 +176,10 @@ func TestFinalReadDisclosure(t *testing.T) {
 		seedInitialRead(t, pool, caseID)
 		seedJob(t, pool, caseID, "succeeded", syntheticAISuccess(t, "1.2.3.4.5.5101", "1.2.3.4.7", "c1"), nil)
 
-		if _, err := store.GetAI(ctx, caseID, initialread.Reader); !errors.Is(err, finalread.ErrForbidden) {
+		if _, err := store.GetAI(ctx, caseID, readerUserID(t, pool)); !errors.Is(err, finalread.ErrForbidden) {
 			t.Fatalf("GetAI error = %v, want ErrForbidden", err)
 		}
-		if _, err := store.GetFinal(ctx, caseID, initialread.Reader); !errors.Is(err, finalread.ErrForbidden) {
+		if _, err := store.GetFinal(ctx, caseID, readerUserID(t, pool)); !errors.Is(err, finalread.ErrForbidden) {
 			t.Fatalf("GetFinal error = %v, want ErrForbidden", err)
 		}
 	})
@@ -188,19 +188,19 @@ func TestFinalReadDisclosure(t *testing.T) {
 		caseID := seedCase(t, pool, "1.2.3.4.5.5102", "awaiting_read")
 		seedJob(t, pool, caseID, "succeeded", syntheticAISuccess(t, "1.2.3.4.5.5102", "1.2.3.4.7", "c1", "c2"), nil)
 
-		if _, err := initial.ReplaceInitialMarks(ctx, caseID, initialread.Reader, []initialread.Mark{markA()}); err != nil {
+		if _, err := initial.ReplaceInitialMarks(ctx, caseID, readerUserID(t, pool), []initialread.Mark{markA()}); err != nil {
 			t.Fatalf("ReplaceInitialMarks: %v", err)
 		}
-		result, err := initial.SubmitInitial(ctx, caseID, initialread.Reader)
+		result, err := initial.SubmitInitial(ctx, caseID, readerUserID(t, pool))
 		if err != nil {
 			t.Fatalf("SubmitInitial: %v", err)
 		}
 
-		final, err := store.GetFinal(ctx, caseID, initialread.Reader)
+		final, err := store.GetFinal(ctx, caseID, readerUserID(t, pool))
 		if err != nil {
 			t.Fatalf("GetFinal: %v", err)
 		}
-		if final.ID != result.FinalReadID || final.Kind != "final" || final.Reader != initialread.Reader {
+		if final.ID != result.FinalReadID || final.Kind != "final" || final.Reader != integrationReaderName {
 			t.Fatalf("final identity = %+v", final)
 		}
 		assertMarksEqual(t, final.Marks, []initialread.Mark{markA()}, "final copy")
@@ -208,7 +208,7 @@ func TestFinalReadDisclosure(t *testing.T) {
 			t.Fatalf("final decisions = %#v, want empty", final.CandidateDecisions)
 		}
 
-		ai, err := store.GetAI(ctx, caseID, initialread.Reader)
+		ai, err := store.GetAI(ctx, caseID, readerUserID(t, pool))
 		if err != nil {
 			t.Fatalf("GetAI: %v", err)
 		}
@@ -222,10 +222,10 @@ func TestFinalReadDisclosure(t *testing.T) {
 		seedInitialRead(t, pool, caseID)
 		seedJob(t, pool, caseID, "queued", nil, nil)
 
-		if _, err := store.GetAI(ctx, caseID, initialread.Reader); !errors.Is(err, finalread.ErrConflict) {
+		if _, err := store.GetAI(ctx, caseID, readerUserID(t, pool)); !errors.Is(err, finalread.ErrConflict) {
 			t.Fatalf("GetAI error = %v, want ErrConflict", err)
 		}
-		if _, err := store.GetFinal(ctx, caseID, initialread.Reader); !errors.Is(err, finalread.ErrConflict) {
+		if _, err := store.GetFinal(ctx, caseID, readerUserID(t, pool)); !errors.Is(err, finalread.ErrConflict) {
 			t.Fatalf("GetFinal error = %v, want ErrConflict", err)
 		}
 	})
@@ -234,7 +234,7 @@ func TestFinalReadDisclosure(t *testing.T) {
 		caseID := seedCase(t, pool, "1.2.3.4.5.5104", "initial_locked")
 		seedJob(t, pool, caseID, "queued", nil, nil)
 
-		if _, err := store.GetAI(ctx, caseID, initialread.Reader); !errors.Is(err, finalread.ErrConflict) {
+		if _, err := store.GetAI(ctx, caseID, readerUserID(t, pool)); !errors.Is(err, finalread.ErrConflict) {
 			t.Fatalf("GetAI error = %v, want ErrConflict", err)
 		}
 	})
@@ -247,17 +247,17 @@ func TestFinalReadDisclosure(t *testing.T) {
 		}
 		seedJob(t, pool, caseID, "queued", nil, nil)
 
-		if _, err := store.GetFinal(ctx, caseID, initialread.Reader); !errors.Is(err, finalread.ErrConflict) {
+		if _, err := store.GetFinal(ctx, caseID, readerUserID(t, pool)); !errors.Is(err, finalread.ErrConflict) {
 			t.Fatalf("GetFinal error = %v, want ErrConflict", err)
 		}
 		// A locked case may still read its AI status without a final read.
-		if ai, err := store.GetAI(ctx, caseID, initialread.Reader); err != nil || ai.Status != finalread.AIQueued {
+		if ai, err := store.GetAI(ctx, caseID, readerUserID(t, pool)); err != nil || ai.Status != finalread.AIQueued {
 			t.Fatalf("GetAI = %+v, %v", ai, err)
 		}
 	})
 
 	t.Run("nonexistent case is not found", func(t *testing.T) {
-		if _, err := store.GetAI(ctx, 999999, initialread.Reader); !errors.Is(err, finalread.ErrNotFound) {
+		if _, err := store.GetAI(ctx, 999999, readerUserID(t, pool)); !errors.Is(err, finalread.ErrNotFound) {
 			t.Fatalf("GetAI error = %v, want ErrNotFound", err)
 		}
 	})
@@ -279,7 +279,7 @@ func TestFinalReadAIProjection(t *testing.T) {
 			caseID, _, _ := seedLockedCase(t, pool, series(10+index))
 			seedJob(t, pool, caseID, status, nil, nil)
 
-			ai, err := store.GetAI(ctx, caseID, initialread.Reader)
+			ai, err := store.GetAI(ctx, caseID, readerUserID(t, pool))
 			if err != nil {
 				t.Fatalf("%s: %v", status, err)
 			}
@@ -307,7 +307,7 @@ func TestFinalReadAIProjection(t *testing.T) {
 				caseID, _, _ := seedLockedCase(t, pool, series(20+index))
 				seedJob(t, pool, caseID, "failed", nil, test.code)
 
-				ai, err := store.GetAI(ctx, caseID, initialread.Reader)
+				ai, err := store.GetAI(ctx, caseID, readerUserID(t, pool))
 				if err != nil {
 					t.Fatalf("GetAI: %v", err)
 				}
@@ -328,7 +328,7 @@ func TestFinalReadAIProjection(t *testing.T) {
 		caseID, _, _ := seedLockedCase(t, pool, series(30))
 		seedJob(t, pool, caseID, "succeeded", syntheticAISuccess(t, series(30), "1.2.3.4.7", "c1", "c2"), nil)
 
-		ai, err := store.GetAI(ctx, caseID, initialread.Reader)
+		ai, err := store.GetAI(ctx, caseID, readerUserID(t, pool))
 		if err != nil {
 			t.Fatalf("GetAI: %v", err)
 		}
@@ -363,7 +363,7 @@ func TestFinalReadAIProjection(t *testing.T) {
 		seedJob(t, pool, caseID, "succeeded", syntheticAISuccess(t, series(31), "1.2.3.4.7", "old"), nil)
 		seedJob(t, pool, caseID, "failed", nil, nil)
 
-		ai, err := store.GetAI(ctx, caseID, initialread.Reader)
+		ai, err := store.GetAI(ctx, caseID, readerUserID(t, pool))
 		if err != nil {
 			t.Fatalf("GetAI: %v", err)
 		}
@@ -376,7 +376,7 @@ func TestFinalReadAIProjection(t *testing.T) {
 		caseID, _, _ := seedLockedCase(t, pool, series(32))
 		seedJob(t, pool, caseID, "succeeded", []byte(`{"schema_version":"1"}`), nil)
 
-		if _, err := store.GetAI(ctx, caseID, initialread.Reader); !errors.Is(err, finalread.ErrDependency) {
+		if _, err := store.GetAI(ctx, caseID, readerUserID(t, pool)); !errors.Is(err, finalread.ErrDependency) {
 			t.Fatalf("GetAI error = %v, want ErrDependency", err)
 		}
 	})
@@ -409,7 +409,7 @@ func TestFinalReadAIProjection(t *testing.T) {
 				clinicalBefore := snapshotClinical(t, pool)
 				jobBefore := jobFingerprint(t, pool, jobID)
 
-				if _, err := store.GetAI(ctx, caseID, initialread.Reader); !errors.Is(err, finalread.ErrDependency) {
+				if _, err := store.GetAI(ctx, caseID, readerUserID(t, pool)); !errors.Is(err, finalread.ErrDependency) {
 					t.Fatalf("GetAI error = %v, want ErrDependency", err)
 				}
 
@@ -457,7 +457,7 @@ func TestFinalReadReplacement(t *testing.T) {
 				{CandidateID: "c2", Decision: finalread.DecisionDismissed, DismissReason: &reason},
 			},
 		}
-		saved, err := service.ReplaceFinal(ctx, caseID, value)
+		saved, err := service.ReplaceFinal(ctx, caseID, readerUserID(t, pool), value)
 		if err != nil {
 			t.Fatalf("ReplaceFinal: %v", err)
 		}
@@ -475,7 +475,7 @@ func TestFinalReadReplacement(t *testing.T) {
 			t.Fatalf("final_read_saved event count wrong")
 		}
 
-		reloaded, err := store.GetFinal(ctx, caseID, initialread.Reader)
+		reloaded, err := store.GetFinal(ctx, caseID, readerUserID(t, pool))
 		if err != nil {
 			t.Fatalf("GetFinal: %v", err)
 		}
@@ -484,13 +484,13 @@ func TestFinalReadReplacement(t *testing.T) {
 
 	t.Run("clearing the whole read", func(t *testing.T) {
 		caseID, finalID := seed(2, "c1")
-		if _, err := service.ReplaceFinal(ctx, caseID, finalread.Replacement{
+		if _, err := service.ReplaceFinal(ctx, caseID, readerUserID(t, pool), finalread.Replacement{
 			Marks:              []initialread.Mark{withFinalOrigin(markA(), finalread.OriginFromAICandidate, new("c1"))},
 			CandidateDecisions: []finalread.Decision{{CandidateID: "c1", Decision: finalread.DecisionAccepted}},
 		}); err != nil {
 			t.Fatalf("first ReplaceFinal: %v", err)
 		}
-		saved, err := service.ReplaceFinal(ctx, caseID, finalread.Replacement{
+		saved, err := service.ReplaceFinal(ctx, caseID, readerUserID(t, pool), finalread.Replacement{
 			Marks:              []initialread.Mark{},
 			CandidateDecisions: []finalread.Decision{},
 		})
@@ -526,7 +526,7 @@ func TestFinalReadReplacement(t *testing.T) {
 				CandidateDecisions: []finalread.Decision{{CandidateID: "c9", Decision: finalread.DecisionAccepted}},
 			},
 		} {
-			if _, err := service.ReplaceFinal(ctx, caseID, value); !errors.Is(err, finalread.ErrInvalid) {
+			if _, err := service.ReplaceFinal(ctx, caseID, readerUserID(t, pool), value); !errors.Is(err, finalread.ErrInvalid) {
 				t.Fatalf("%s: error = %v, want ErrInvalid", name, err)
 			}
 		}
@@ -541,7 +541,7 @@ func TestFinalReadReplacement(t *testing.T) {
 			caseID, _, _ := seedLockedCase(t, pool, series(40+index))
 			var code *string
 			seedJob(t, pool, caseID, status, nil, code)
-			if _, err := service.ReplaceFinal(ctx, caseID, value); !errors.Is(err, finalread.ErrInvalid) {
+			if _, err := service.ReplaceFinal(ctx, caseID, readerUserID(t, pool), value); !errors.Is(err, finalread.ErrInvalid) {
 				t.Fatalf("%s: error = %v, want ErrInvalid", status, err)
 			}
 		}
@@ -554,13 +554,13 @@ func TestFinalReadReplacement(t *testing.T) {
 		}
 		failedCase, _, _ := seedLockedCase(t, pool, series(50))
 		seedJob(t, pool, failedCase, "failed", nil, nil)
-		if _, err := service.ReplaceFinal(ctx, failedCase, value); err != nil {
+		if _, err := service.ReplaceFinal(ctx, failedCase, readerUserID(t, pool), value); err != nil {
 			t.Fatalf("failed job: %v", err)
 		}
 
 		corruptCase, _, _ := seedLockedCase(t, pool, series(51))
 		seedJob(t, pool, corruptCase, "succeeded", []byte(`{"schema_version":"1"}`), nil)
-		if _, err := service.ReplaceFinal(ctx, corruptCase, value); err != nil {
+		if _, err := service.ReplaceFinal(ctx, corruptCase, readerUserID(t, pool), value); err != nil {
 			t.Fatalf("corrupt result: %v", err)
 		}
 	})
@@ -571,7 +571,7 @@ func TestFinalReadReplacement(t *testing.T) {
 			Marks:              []initialread.Mark{withFinalOrigin(markA(), finalread.OriginFromAICandidate, new("c1"))},
 			CandidateDecisions: []finalread.Decision{{CandidateID: "c1", Decision: finalread.DecisionAccepted}},
 		}
-		if _, err := service.ReplaceFinal(ctx, caseID, committed); err != nil {
+		if _, err := service.ReplaceFinal(ctx, caseID, readerUserID(t, pool), committed); err != nil {
 			t.Fatalf("commit: %v", err)
 		}
 		runtime := h.runtime(t)
@@ -589,7 +589,7 @@ func TestFinalReadReplacement(t *testing.T) {
 			},
 			CandidateDecisions: []finalread.Decision{{CandidateID: "c1", Decision: finalread.DecisionAccepted}},
 		}
-		if _, err := service.ReplaceFinal(ctx, caseID, attempt); !errors.Is(err, finalread.ErrDependency) {
+		if _, err := service.ReplaceFinal(ctx, caseID, readerUserID(t, pool), attempt); !errors.Is(err, finalread.ErrDependency) {
 			t.Fatalf("error = %v, want ErrDependency", err)
 		}
 
@@ -615,7 +615,7 @@ func TestFinalReadReplacement(t *testing.T) {
 			Marks:              []initialread.Mark{withFinalOrigin(markA(), finalread.OriginReader, nil)},
 			CandidateDecisions: []finalread.Decision{},
 		}
-		if _, err := service.ReplaceFinal(ctx, caseID, value); !errors.Is(err, finalread.ErrDependency) {
+		if _, err := service.ReplaceFinal(ctx, caseID, readerUserID(t, pool), value); !errors.Is(err, finalread.ErrDependency) {
 			t.Fatalf("error = %v, want ErrDependency", err)
 		}
 		if countMarksOn(t, runtime, finalID) != 0 {
@@ -659,7 +659,7 @@ func TestFinalReadCanceledUnderLock(t *testing.T) {
 
 	waitCtx, cancel := context.WithTimeout(ctx, 1500*time.Millisecond)
 	defer cancel()
-	_, err = service.ReplaceFinal(waitCtx, caseID, finalread.Replacement{
+	_, err = service.ReplaceFinal(waitCtx, caseID, readerUserID(t, pool), finalread.Replacement{
 		Marks:              []initialread.Mark{withFinalOrigin(markA(), finalread.OriginReader, nil)},
 		CandidateDecisions: []finalread.Decision{{CandidateID: "c1", Decision: finalread.DecisionAccepted}},
 	})
@@ -678,7 +678,7 @@ func TestFinalReadCanceledUnderLock(t *testing.T) {
 		t.Fatalf("canceled replacement recorded an event")
 	}
 	// The pool stays usable after the canceled request.
-	if _, err := store.GetFinal(ctx, caseID, initialread.Reader); err != nil {
+	if _, err := store.GetFinal(ctx, caseID, readerUserID(t, pool)); err != nil {
 		t.Fatalf("pool unusable after cancellation: %v", err)
 	}
 }

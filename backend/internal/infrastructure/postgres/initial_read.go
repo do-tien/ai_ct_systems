@@ -41,10 +41,11 @@ func (s *InitialReadStore) GetCase(ctx context.Context, caseID int64) (initialre
 	return toCase(row), nil
 }
 
-// GetOrCreateInitial returns the initial read, creating an empty draft only when
-// the case is still awaiting its read. A later-state case without a read is a
-// conflict, never a fabricated draft. The case row is locked before the read.
-func (s *InitialReadStore) GetOrCreateInitial(ctx context.Context, caseID int64, reader string) (initialread.Read, error) {
+// GetOrCreateInitial returns the authenticated owner's initial read, creating an
+// empty draft only when the case is still awaiting its read. A later-state case
+// without a read is a conflict, never a fabricated draft, and a read owned by
+// another user is forbidden. The case row is locked before the read.
+func (s *InitialReadStore) GetOrCreateInitial(ctx context.Context, caseID, userID int64) (initialread.Read, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return initialread.Read{}, beginFailure(ctx)
@@ -64,21 +65,24 @@ func (s *InitialReadStore) GetOrCreateInitial(ctx context.Context, caseID int64,
 	var readLockedAt pgtype.Timestamptz
 	switch {
 	case err == nil:
+		if existing.ReaderUserID != userID {
+			return initialread.Read{}, failInitial(initialread.ErrForbidden, "initial read belongs to another user")
+		}
 		// Existing read (locked or not) is returned unchanged.
-		readID, readCaseID, readKind, readReader, readLockedAt = existing.ID, existing.CaseID, existing.Kind, existing.Reader, existing.LockedAt
+		readID, readCaseID, readKind, readReader, readLockedAt = existing.ID, existing.CaseID, existing.Kind, existing.ReaderDisplayName, existing.LockedAt
 	case errors.Is(err, pgx.ErrNoRows):
 		if caseRow.Status != statusAwaitingRead {
 			return initialread.Read{}, failInitial(initialread.ErrLocked, "case no longer accepts an initial read")
 		}
 		created, createErr := queries.CreateRead(ctx, lc1db.CreateReadParams{
-			CaseID: caseID,
-			Kind:   initialread.KindInitial,
-			Reader: reader,
+			CaseID:       caseID,
+			Kind:         initialread.KindInitial,
+			ReaderUserID: userID,
 		})
 		if createErr != nil {
 			return initialread.Read{}, classifyInitialRead(ctx, createErr)
 		}
-		readID, readCaseID, readKind, readReader, readLockedAt = created.ID, created.CaseID, created.Kind, created.Reader, created.LockedAt
+		readID, readCaseID, readKind, readReader, readLockedAt = created.ID, created.CaseID, created.Kind, created.ReaderDisplayName, created.LockedAt
 	default:
 		return initialread.Read{}, classifyInitialRead(ctx, err)
 	}
@@ -98,7 +102,7 @@ func (s *InitialReadStore) GetOrCreateInitial(ctx context.Context, caseID int64,
 // case state and lock are checked under the same case-row lock, and the old
 // list is deleted and the new one inserted in request order inside one
 // transaction: a failure before COMMIT leaves the original list intact.
-func (s *InitialReadStore) ReplaceInitialMarks(ctx context.Context, caseID int64, reader string, marks []initialread.Mark) ([]initialread.Mark, error) {
+func (s *InitialReadStore) ReplaceInitialMarks(ctx context.Context, caseID, userID int64, marks []initialread.Mark) ([]initialread.Mark, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return nil, beginFailure(ctx)
@@ -116,6 +120,9 @@ func (s *InitialReadStore) ReplaceInitialMarks(ctx context.Context, caseID int64
 	var readID int64
 	switch {
 	case err == nil:
+		if read.ReaderUserID != userID {
+			return nil, failInitial(initialread.ErrForbidden, "initial read belongs to another user")
+		}
 		if caseRow.Status != statusAwaitingRead || read.LockedAt.Valid {
 			return nil, failInitial(initialread.ErrLocked, "initial read is locked")
 		}
@@ -125,9 +132,9 @@ func (s *InitialReadStore) ReplaceInitialMarks(ctx context.Context, caseID int64
 			return nil, failInitial(initialread.ErrLocked, "case no longer accepts an initial read")
 		}
 		created, createErr := queries.CreateRead(ctx, lc1db.CreateReadParams{
-			CaseID: caseID,
-			Kind:   initialread.KindInitial,
-			Reader: reader,
+			CaseID:       caseID,
+			Kind:         initialread.KindInitial,
+			ReaderUserID: userID,
 		})
 		if createErr != nil {
 			return nil, classifyInitialRead(ctx, createErr)
@@ -167,10 +174,10 @@ func (s *InitialReadStore) ReplaceInitialMarks(ctx context.Context, caseID int64
 	return saved, nil
 }
 
-// SubmitInitial locks the fixed-reader initial read, creates its editable final
-// read and copies every stored mark, then transitions the case and appends the
-// audit event. All of it commits together or not at all.
-func (s *InitialReadStore) SubmitInitial(ctx context.Context, caseID int64, reader string) (initialread.SubmitResult, error) {
+// SubmitInitial locks the authenticated owner's initial read, creates its
+// editable final read and copies every stored mark, then transitions the case
+// and appends the audit event. All of it commits together or not at all.
+func (s *InitialReadStore) SubmitInitial(ctx context.Context, caseID, userID int64) (initialread.SubmitResult, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return initialread.SubmitResult{}, beginFailure(ctx)
@@ -183,9 +190,6 @@ func (s *InitialReadStore) SubmitInitial(ctx context.Context, caseID int64, read
 	if err != nil {
 		return initialread.SubmitResult{}, classifyInitialRead(ctx, err)
 	}
-	if caseRow.Status != statusAwaitingRead || caseRow.FinalizedAt.Valid {
-		return initialread.SubmitResult{}, failInitial(initialread.ErrLocked, "case does not accept an initial submit")
-	}
 
 	initial, err := queries.GetReadForUpdate(ctx, lc1db.GetReadForUpdateParams{CaseID: caseID, Kind: initialread.KindInitial})
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -194,8 +198,11 @@ func (s *InitialReadStore) SubmitInitial(ctx context.Context, caseID int64, read
 	if err != nil {
 		return initialread.SubmitResult{}, classifyInitialRead(ctx, err)
 	}
-	if initial.Reader != reader {
-		return initialread.SubmitResult{}, failInitial(initialread.ErrConflict, "initial read has an unexpected reader")
+	if initial.ReaderUserID != userID {
+		return initialread.SubmitResult{}, failInitial(initialread.ErrForbidden, "initial read belongs to another user")
+	}
+	if caseRow.Status != statusAwaitingRead || caseRow.FinalizedAt.Valid {
+		return initialread.SubmitResult{}, failInitial(initialread.ErrLocked, "case does not accept an initial submit")
 	}
 	if initial.LockedAt.Valid {
 		return initialread.SubmitResult{}, failInitial(initialread.ErrLocked, "initial read is already locked")
@@ -217,9 +224,9 @@ func (s *InitialReadStore) SubmitInitial(ctx context.Context, caseID int64, read
 	}
 
 	final, err := queries.CreateRead(ctx, lc1db.CreateReadParams{
-		CaseID: caseID,
-		Kind:   initialread.KindFinal,
-		Reader: reader,
+		CaseID:       caseID,
+		Kind:         initialread.KindFinal,
+		ReaderUserID: userID,
 	})
 	if err != nil {
 		return initialread.SubmitResult{}, classifyInitialRead(ctx, err)
@@ -244,10 +251,11 @@ func (s *InitialReadStore) SubmitInitial(ctx context.Context, caseID int64, read
 		return initialread.SubmitResult{}, failInitial(initialread.ErrDependency, "cannot encode the submit audit detail")
 	}
 	if _, err := queries.AppendEvent(ctx, lc1db.AppendEventParams{
-		CaseID: pgtype.Int8{Int64: caseID, Valid: true},
-		Actor:  "reader",
-		Action: "initial_submitted",
-		Detail: detail,
+		CaseID:      pgtype.Int8{Int64: caseID, Valid: true},
+		Actor:       initial.ReaderDisplayName,
+		Action:      "initial_submitted",
+		Detail:      detail,
+		ActorUserID: pgtype.Int8{Int64: userID, Valid: true},
 	}); err != nil {
 		return initialread.SubmitResult{}, classifyInitialRead(ctx, err)
 	}
@@ -349,12 +357,12 @@ func toCase(row lc1db.Case) initialread.Case {
 	}
 }
 
-func toRead(id, caseID int64, kind, reader string, lockedAt pgtype.Timestamptz, marks []initialread.Mark) initialread.Read {
+func toRead(id, caseID int64, kind, displayName string, lockedAt pgtype.Timestamptz, marks []initialread.Mark) initialread.Read {
 	return initialread.Read{
 		ID:       id,
 		CaseID:   caseID,
 		Kind:     kind,
-		Reader:   reader,
+		Reader:   displayName,
 		LockedAt: timePointer(lockedAt),
 		Marks:    marks,
 	}

@@ -135,11 +135,11 @@ func TestAuthMigrationSchema(t *testing.T) {
 	t.Run("reads_ownership", func(t *testing.T) {
 		columns := tableColumns(t, owner, "reads")
 		requireColumn(t, columns, "reader_user_id")
-		if !columns["reader_user_id"].Nullable {
-			t.Fatalf("reads.reader_user_id must stay nullable until the ownership cutover")
+		if columns["reader_user_id"].Nullable {
+			t.Fatalf("reads.reader_user_id must be NOT NULL after the ownership cutover")
 		}
-		if _, ok := columns["reader"]; !ok {
-			t.Fatalf("reads.reader must remain the authoritative identity column")
+		if _, ok := columns["reader"]; ok {
+			t.Fatalf("reads.reader must be removed after the ownership cutover")
 		}
 	})
 
@@ -451,21 +451,15 @@ func TestAuthSessionForeignKeys(t *testing.T) {
 	}
 	caseRow := createCase(t, q, "1.2.3.4.90")
 	read, err := q.CreateRead(ctx, lc1db.CreateReadParams{
-		CaseID: caseRow.ID,
-		Kind:   "initial",
-		Reader: readUser.DisplayName,
+		CaseID:       caseRow.ID,
+		Kind:         "initial",
+		ReaderUserID: readUser.ID,
 	})
 	if err != nil {
 		t.Fatalf("CreateRead: %v", err)
 	}
-	if read.ReaderUserID.Valid {
-		t.Fatalf("new read owner = %+v, want null", read.ReaderUserID)
-	}
-	// A backfilled row carries an explicit owner and restricts user deletion.
-	if _, err := owner.Exec(ctx,
-		`INSERT INTO reads (case_id, kind, reader, reader_user_id) VALUES ($1, 'final', 'read-owner', $2)`,
-		caseRow.ID, readUser.ID); err != nil {
-		t.Fatalf("seed owned read: %v", err)
+	if read.ReaderUserID != readUser.ID || read.ReaderDisplayName != readUser.DisplayName {
+		t.Fatalf("new read projection = %+v, want owner %d", read, readUser.ID)
 	}
 	_, err = owner.Exec(ctx, `DELETE FROM users WHERE id = $1`, readUser.ID)
 	assertSQLState(t, err, "23503", "delete read owner")
@@ -535,6 +529,23 @@ func TestAuthLegacyBackfill(t *testing.T) {
 		t.Fatalf("seed legacy read: %v", err)
 	}
 
+	// 00004 attributes the pre-existing read and creates the disabled legacy
+	// account. A read created after 00004 still has a NULL owner until 00005.
+	migrateTo(t, h, 4)
+
+	var secondCaseID int64
+	if err := owner.QueryRow(ctx, `
+		INSERT INTO cases (source, study_instance_uid, series_instance_uid, orthanc_series_id, frame_of_reference_uid)
+		VALUES ('legacy', '1.2.3.4.103', '1.2.3.4.104', 'orthanc-legacy-2', '1.2.3.4.105')
+		RETURNING id`).Scan(&secondCaseID); err != nil {
+		t.Fatalf("seed second case: %v", err)
+	}
+	var laterReadID int64
+	if err := owner.QueryRow(ctx,
+		`INSERT INTO reads (case_id, kind, reader) VALUES ($1, 'initial', 'dr-later') RETURNING id`, secondCaseID).Scan(&laterReadID); err != nil {
+		t.Fatalf("seed post-00004 read: %v", err)
+	}
+
 	migrateTo(t, h, -1)
 
 	var legacyID int64
@@ -556,53 +567,42 @@ func TestAuthLegacyBackfill(t *testing.T) {
 		t.Fatalf("count users: %v", err)
 	}
 	if count != 1 {
-		t.Fatalf("legacy backfill created %d users, want 1", count)
+		t.Fatalf("legacy backfill created %d users, want the existing legacy account only", count)
 	}
-	var ownerID int64
-	var readerText string
-	if err := owner.QueryRow(ctx, `SELECT reader_user_id, reader FROM reads WHERE id = $1`, readID).Scan(&ownerID, &readerText); err != nil {
-		t.Fatalf("read owner: %v", err)
+	for _, id := range []int64{readID, laterReadID} {
+		var ownerID int64
+		if err := owner.QueryRow(ctx, `SELECT reader_user_id FROM reads WHERE id = $1`, id).Scan(&ownerID); err != nil {
+			t.Fatalf("read %d owner: %v", id, err)
+		}
+		if ownerID != legacyID {
+			t.Fatalf("read %d owner = %d, want legacy user %d", id, ownerID, legacyID)
+		}
 	}
-	if ownerID != legacyID {
-		t.Fatalf("read owner = %d, want legacy user %d", ownerID, legacyID)
-	}
-	if readerText != "dr-legacy" {
-		t.Fatalf("read reader text = %q, want unchanged dr-legacy", readerText)
-	}
-
-	// A post-migration read still writes the caller's reader text and has no
-	// owner until the ownership cutover.
-	var newReadID int64
-	if err := owner.QueryRow(ctx,
-		`INSERT INTO reads (case_id, kind, reader) VALUES ($1, 'initial', 'reader') RETURNING id`, caseID).Scan(&newReadID); err != nil {
-		t.Fatalf("insert post-migration read: %v", err)
-	}
-	var newOwner pgtype.Int8
-	if err := owner.QueryRow(ctx, `SELECT reader_user_id FROM reads WHERE id = $1`, newReadID).Scan(&newOwner); err != nil {
-		t.Fatalf("post-migration read owner: %v", err)
-	}
-	if newOwner.Valid {
-		t.Fatalf("post-migration read owner = %+v, want null", newOwner)
+	if _, ok := tableColumns(t, owner, "reads")["reader"]; ok {
+		t.Fatalf("00005 left reads.reader")
 	}
 
-	// An explicit owner must still reference a real user.
-	var secondCaseID int64
+	// An owner is now mandatory.
+	var thirdCaseID int64
 	if err := owner.QueryRow(ctx, `
 		INSERT INTO cases (source, study_instance_uid, series_instance_uid, orthanc_series_id, frame_of_reference_uid)
-		VALUES ('legacy', '1.2.3.4.103', '1.2.3.4.104', 'orthanc-legacy-2', '1.2.3.4.105')
-		RETURNING id`).Scan(&secondCaseID); err != nil {
-		t.Fatalf("seed second case: %v", err)
+		VALUES ('legacy', '1.2.3.4.106', '1.2.3.4.107', 'orthanc-legacy-3', '1.2.3.4.108')
+		RETURNING id`).Scan(&thirdCaseID); err != nil {
+		t.Fatalf("seed third case: %v", err)
 	}
-	_, err := owner.Exec(ctx,
-		`INSERT INTO reads (case_id, kind, reader, reader_user_id) VALUES ($1, 'initial', 'x', 999999)`, secondCaseID)
+	_, err := owner.Exec(ctx, `INSERT INTO reads (case_id, kind) VALUES ($1, 'initial')`, thirdCaseID)
+	assertSQLState(t, err, "23502", "read owner is required")
+
+	// An explicit owner must still reference a real user.
+	_, err = owner.Exec(ctx, `INSERT INTO reads (case_id, kind, reader_user_id) VALUES ($1, 'final', 999999)`, thirdCaseID)
 	assertSQLState(t, err, "23503", "read owner must exist")
 
 	var applied int64
 	if err := owner.QueryRow(ctx, `SELECT max(version_id) FROM goose_db_version`).Scan(&applied); err != nil {
 		t.Fatalf("goose version: %v", err)
 	}
-	if applied != 4 {
-		t.Fatalf("goose version = %d, want 4", applied)
+	if applied != 5 {
+		t.Fatalf("goose version = %d, want 5", applied)
 	}
 }
 
@@ -635,42 +635,75 @@ func TestAuthMigrationDown(t *testing.T) {
 		t.Fatalf("CreateUser: %v", err)
 	}
 	caseRow := createCase(t, q, "1.2.3.4.110")
-	if _, err := q.CreateRead(ctx, lc1db.CreateReadParams{CaseID: caseRow.ID, Kind: "initial", Reader: user.DisplayName}); err != nil {
+	if _, err := q.CreateRead(ctx, lc1db.CreateReadParams{CaseID: caseRow.ID, Kind: "initial", ReaderUserID: user.ID}); err != nil {
 		t.Fatalf("CreateRead: %v", err)
 	}
 
-	// Down only removes the new ownership column and user/session tables; the
-	// authoritative reader text column was never dropped.
+	// 00005 down restores the text identity from the owner's display name and
+	// returns to the 00004 schema.
 	if _, err := provider.Down(ctx); err != nil {
-		t.Fatalf("migrate down: %v", err)
+		t.Fatalf("migrate down 00005: %v", err)
 	}
 
 	columns := tableColumns(t, owner, "reads")
 	if _, ok := columns["reader"]; !ok {
-		t.Fatalf("down removed reads.reader")
+		t.Fatalf("00005 down did not restore reads.reader")
 	}
 	if _, ok := columns["reader_user_id"]; ok {
-		t.Fatalf("down left reads.reader_user_id")
+		t.Fatalf("00005 down left reads.reader_user_id")
+	}
+	if columns["reader"].Nullable {
+		t.Fatalf("00005 down left reads.reader nullable")
+	}
+	var restored string
+	if err := owner.QueryRow(ctx, `SELECT reader FROM reads WHERE case_id = $1`, caseRow.ID).Scan(&restored); err != nil {
+		t.Fatalf("restored reader: %v", err)
+	}
+	if restored != user.DisplayName {
+		t.Fatalf("restored reader = %q, want %q", restored, user.DisplayName)
+	}
+	var usersPresent bool
+	if err := owner.QueryRow(ctx, `SELECT to_regclass('public.users') IS NOT NULL`).Scan(&usersPresent); err != nil {
+		t.Fatalf("to_regclass users: %v", err)
+	}
+	if !usersPresent {
+		t.Fatalf("00005 down removed users")
+	}
+
+	// The restored text guard rejects changing a read's reader text.
+	_, err = owner.Exec(ctx, `UPDATE reads SET reader = 'other' WHERE id = (SELECT id FROM reads LIMIT 1)`)
+	assertSQLState(t, err, "23514", "identity guard after 00005 down")
+
+	// 00004 down removes the ownership column, the user/session tables and the
+	// event actor id, leaving the historical text column in place.
+	if _, err := provider.Down(ctx); err != nil {
+		t.Fatalf("migrate down 00004: %v", err)
 	}
 	events := tableColumns(t, owner, "events")
 	if _, ok := events["actor_user_id"]; ok {
-		t.Fatalf("down left events.actor_user_id")
+		t.Fatalf("00004 down left events.actor_user_id")
 	}
 	var usersMissing bool
 	if err := owner.QueryRow(ctx, `SELECT to_regclass('public.users') IS NULL`).Scan(&usersMissing); err != nil {
 		t.Fatalf("to_regclass users: %v", err)
 	}
 	if !usersMissing {
-		t.Fatalf("down left users table")
+		t.Fatalf("00004 down left users table")
+	}
+	if _, ok := tableColumns(t, owner, "reads")["reader"]; !ok {
+		t.Fatalf("00004 down removed reads.reader")
 	}
 
-	// The original identity guard still rejects changing a read's reader text.
-	_, err = owner.Exec(ctx, `UPDATE reads SET reader = 'other' WHERE id = (SELECT id FROM reads LIMIT 1)`)
-	assertSQLState(t, err, "23514", "identity guard after down")
-
-	// Re-applying the migration returns to the current schema.
+	// Re-applying both migrations returns to the current schema.
 	if _, err := provider.Up(ctx); err != nil {
 		t.Fatalf("migrate up after down: %v", err)
+	}
+	columns = tableColumns(t, owner, "reads")
+	if columns["reader_user_id"].Nullable {
+		t.Fatalf("re-applied reads.reader_user_id is nullable")
+	}
+	if _, ok := columns["reader"]; ok {
+		t.Fatalf("re-applied schema kept reads.reader")
 	}
 }
 
@@ -690,36 +723,29 @@ func TestAuthQueryProjections(t *testing.T) {
 		t.Fatalf("CreateUser: %v", err)
 	}
 	caseRow := createCase(t, q, "1.2.3.4.120")
-	read, err := q.CreateRead(ctx, lc1db.CreateReadParams{CaseID: caseRow.ID, Kind: "initial", Reader: "projection-reader"})
+	read, err := q.CreateRead(ctx, lc1db.CreateReadParams{CaseID: caseRow.ID, Kind: "initial", ReaderUserID: user.ID})
 	if err != nil {
 		t.Fatalf("CreateRead: %v", err)
 	}
-	if read.Reader != "projection-reader" || read.ReaderUserID.Valid || read.ReaderDisplayName.Valid {
-		t.Fatalf("new read projection = %+v, want reader text and no owner", read)
+	if read.ReaderUserID != user.ID || read.ReaderDisplayName != user.DisplayName {
+		t.Fatalf("new read projection = %+v, want owner %d/name %q", read, user.ID, user.DisplayName)
 	}
 
-	// A backfilled row exposes both its owner id and the joined display name
-	// while the authoritative reader text stays unchanged.
-	if _, err := owner.Exec(ctx,
-		`INSERT INTO reads (case_id, kind, reader, reader_user_id) VALUES ($1, 'final', 'legacy-text', $2)`,
-		caseRow.ID, user.ID); err != nil {
-		t.Fatalf("seed owned read: %v", err)
-	}
-	owned, err := q.GetRead(ctx, lc1db.GetReadParams{CaseID: caseRow.ID, Kind: "final"})
+	owned, err := q.GetRead(ctx, lc1db.GetReadParams{CaseID: caseRow.ID, Kind: "initial"})
 	if err != nil {
 		t.Fatalf("GetRead owned: %v", err)
 	}
-	if owned.Reader != "legacy-text" || owned.ReaderUserID.Int64 != user.ID || owned.ReaderDisplayName.String != user.DisplayName {
+	if owned.ReaderUserID != user.ID || owned.ReaderDisplayName != user.DisplayName {
 		t.Fatalf("owned read projection = %+v, want owner %d", owned, user.ID)
 	}
 
-	_, err = owner.Exec(ctx, `UPDATE reads SET reader = 'other' WHERE id = $1`, read.ID)
+	_, err = owner.Exec(ctx, `UPDATE reads SET reader_user_id = reader_user_id + 1 WHERE id = $1`, read.ID)
 	assertSQLState(t, err, "23514", "read identity is immutable")
 	locked, err := q.LockRead(ctx, read.ID)
 	if err != nil {
 		t.Fatalf("LockRead: %v", err)
 	}
-	if locked.Reader != "projection-reader" || locked.ReaderUserID.Valid {
+	if locked.ReaderUserID != user.ID || locked.ReaderDisplayName != user.DisplayName {
 		t.Fatalf("locked read projection = %+v", locked)
 	}
 

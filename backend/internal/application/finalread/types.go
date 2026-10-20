@@ -24,6 +24,9 @@ var (
 	// ErrForbidden means the case has not locked its independent initial read,
 	// so no AI or final data may be disclosed.
 	ErrForbidden = errors.New("initial read is not locked")
+	// ErrAssignedToAnotherUser means the case's initial or final read belongs to
+	// another authenticated user.
+	ErrAssignedToAnotherUser = errors.New("case is assigned to another user")
 	// ErrLocked means the final read or the case is already finalized and no
 	// longer accepts changes.
 	ErrLocked = errors.New("final read is locked")
@@ -182,10 +185,11 @@ type AI struct {
 }
 
 // Store is the consumer-owned persistence port. Every method propagates the
-// caller's context and classifies failures into the sentinel categories above.
+// caller's context, receives the authenticated owner of the clinical work, and
+// classifies failures into the sentinel categories above.
 type Store interface {
-	GetAI(ctx context.Context, caseID int64, reader string) (AI, error)
-	GetFinal(ctx context.Context, caseID int64, reader string) (Read, error)
-	ReplaceFinal(ctx context.Context, caseID int64, reader string, value Replacement) (Read, error)
-	Finalize(ctx context.Context, caseID int64, reader string) (FinalizeResult, error)
+	GetAI(ctx context.Context, caseID, userID int64) (AI, error)
+	GetFinal(ctx context.Context, caseID, userID int64) (Read, error)
+	ReplaceFinal(ctx context.Context, caseID, userID int64, value Replacement) (Read, error)
+	Finalize(ctx context.Context, caseID, userID int64) (FinalizeResult, error)
 }

@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -29,26 +30,34 @@ type fakeUploadService struct {
 	discardErr     error
 	prepareFiles   []caseimport.StagedFile
 	prepareSkipped int
+	prepareUserID  int64
 	confirmKey     string
 	confirmID      string
+	confirmUserID  int64
+	getUserID      int64
+	discardUserID  int64
 }
 
-func (f *fakeUploadService) Prepare(ctx context.Context, files []caseimport.StagedFile, skipped int) (caseimport.Session, error) {
+func (f *fakeUploadService) Prepare(ctx context.Context, files []caseimport.StagedFile, skipped int, userID int64) (caseimport.Session, error) {
 	f.prepareFiles = files
 	f.prepareSkipped = skipped
+	f.prepareUserID = userID
 	return f.prepareResult, f.prepareErr
 }
 
-func (f *fakeUploadService) Confirm(ctx context.Context, uploadID, seriesKey string) (caseimport.Result, error) {
+func (f *fakeUploadService) Confirm(ctx context.Context, uploadID, seriesKey string, userID int64) (caseimport.Result, error) {
 	f.confirmID, f.confirmKey = uploadID, seriesKey
+	f.confirmUserID = userID
 	return f.confirmResult, f.confirmErr
 }
 
-func (f *fakeUploadService) Get(ctx context.Context, uploadID string) (caseimport.Session, error) {
+func (f *fakeUploadService) Get(ctx context.Context, uploadID string, userID int64) (caseimport.Session, error) {
+	f.getUserID = userID
 	return f.getResult, f.getErr
 }
 
-func (f *fakeUploadService) Discard(ctx context.Context, uploadID string) error {
+func (f *fakeUploadService) Discard(ctx context.Context, uploadID string, userID int64) error {
+	f.discardUserID = userID
 	return f.discardErr
 }
 
@@ -419,4 +428,103 @@ func zipBytesForTest(t *testing.T, entries map[string][]byte, order []string) []
 		t.Fatalf("zip close: %v", err)
 	}
 	return buf.Bytes()
+}
+
+// TestUploadHandlersForwardPrincipal proves every upload operation carries the
+// authenticated user id.
+func TestUploadHandlersForwardPrincipal(t *testing.T) {
+	const principalUserID = int64(7) // newFakeAuth's fixed principal.
+
+	t.Run("prepare", func(t *testing.T) {
+		service := &fakeUploadService{prepareResult: sampleSession()}
+		router := uploadRouter(t, service, upload.DefaultLimits(), 1<<20)
+		request := uploadRequest(t, http.MethodPost, "/api/uploads", []uploadPart{{name: "one.dcm", data: []byte("dicom")}})
+		recorder := doUpload(t, router, request)
+		if recorder.Code != http.StatusCreated {
+			t.Fatalf("status = %d (%s)", recorder.Code, recorder.Body.String())
+		}
+		if service.prepareUserID != principalUserID {
+			t.Fatalf("user = %d, want %d", service.prepareUserID, principalUserID)
+		}
+	})
+	t.Run("get", func(t *testing.T) {
+		service := &fakeUploadService{getResult: sampleSession()}
+		router := uploadRouter(t, service, upload.DefaultLimits(), 1<<20)
+		recorder := doUpload(t, router, httptest.NewRequest(http.MethodGet, "/api/uploads/session-token", nil))
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("status = %d", recorder.Code)
+		}
+		if service.getUserID != principalUserID {
+			t.Fatalf("user = %d, want %d", service.getUserID, principalUserID)
+		}
+	})
+	t.Run("confirm", func(t *testing.T) {
+		service := &fakeUploadService{confirmResult: caseimport.Result{CaseID: 1}}
+		router := uploadRouter(t, service, upload.DefaultLimits(), 1<<20)
+		request := httptest.NewRequest(http.MethodPost, "/api/uploads/session-token/cases", strings.NewReader(`{"series_id":"key-1"}`))
+		recorder := doUpload(t, router, request)
+		if recorder.Code != http.StatusCreated {
+			t.Fatalf("status = %d (%s)", recorder.Code, recorder.Body.String())
+		}
+		if service.confirmUserID != principalUserID {
+			t.Fatalf("user = %d, want %d", service.confirmUserID, principalUserID)
+		}
+	})
+	t.Run("discard", func(t *testing.T) {
+		service := &fakeUploadService{}
+		router := uploadRouter(t, service, upload.DefaultLimits(), 1<<20)
+		recorder := doUpload(t, router, httptest.NewRequest(http.MethodDelete, "/api/uploads/session-token", nil))
+		if recorder.Code != http.StatusNoContent {
+			t.Fatalf("status = %d", recorder.Code)
+		}
+		if service.discardUserID != principalUserID {
+			t.Fatalf("user = %d, want %d", service.discardUserID, principalUserID)
+		}
+	})
+}
+
+// TestUploadHandlersRequirePrincipal proves the upload namespace fails closed if
+// it is ever mounted without the session middleware.
+func TestUploadHandlersRequirePrincipal(t *testing.T) {
+	handler := newUploadHandlerForTest(t, &fakeUploadService{}, upload.DefaultLimits(), 1<<20)
+	cases := []struct {
+		method string
+		target string
+		body   io.Reader
+	}{
+		{http.MethodPost, "/api/uploads", bytes.NewReader(nil)},
+		{http.MethodGet, "/api/uploads/session-token", nil},
+		{http.MethodPost, "/api/uploads/session-token/cases", strings.NewReader(`{"series_id":"key-1"}`)},
+		{http.MethodDelete, "/api/uploads/session-token", nil},
+	}
+	for _, test := range cases {
+		t.Run(test.method+" "+test.target, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			handler.ServeHTTP(recorder, httptest.NewRequest(test.method, test.target, test.body))
+			if recorder.Code != http.StatusUnauthorized {
+				t.Fatalf("status = %d, want 401", recorder.Code)
+			}
+			if code := uploadErrorCode(t, decodeBody(t, recorder)); code != codeAuthRequired {
+				t.Fatalf("code = %q, want %s", code, codeAuthRequired)
+			}
+		})
+	}
+}
+
+// TestUploadForbiddenMapping maps a foreign session to the fixed 403 code.
+func TestUploadForbiddenMapping(t *testing.T) {
+	service := &fakeUploadService{discardErr: caseimport.Fail(caseimport.ErrForbidden, "owned elsewhere")}
+	router := uploadRouter(t, service, upload.DefaultLimits(), 1<<20)
+	recorder := doUpload(t, router, httptest.NewRequest(http.MethodDelete, "/api/uploads/session-token", nil))
+	if recorder.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", recorder.Code)
+	}
+	payload := decodeBody(t, recorder)
+	if code := uploadErrorCode(t, payload); code != "UPLOAD_FORBIDDEN" {
+		t.Fatalf("code = %q, want UPLOAD_FORBIDDEN", code)
+	}
+	errorObject := payload["error"].(map[string]any)
+	if errorObject["message"] != uploadErrorMessages["UPLOAD_FORBIDDEN"] {
+		t.Fatalf("message = %v", errorObject["message"])
+	}
 }

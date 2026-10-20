@@ -189,7 +189,7 @@ func TestPrepareHonorsCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, err := caseimport.NewService(archive, store).Prepare(ctx, []caseimport.StagedFile{{Path: "slice", Size: 4}}, 0)
+	_, err := caseimport.NewService(archive, store).Prepare(ctx, []caseimport.StagedFile{{Path: "slice", Size: 4}}, 0, 1)
 	if !errors.Is(err, caseimport.ErrCanceled) {
 		t.Fatalf("error = %v, want %v", err, caseimport.ErrCanceled)
 	}
@@ -199,7 +199,7 @@ func TestPrepareHonorsCancellation(t *testing.T) {
 }
 
 func TestPrepareRejectsEmptySelection(t *testing.T) {
-	_, err := caseimport.NewService(&fakeArchive{}, &fakeStore{}).Prepare(context.Background(), nil, 0)
+	_, err := caseimport.NewService(&fakeArchive{}, &fakeStore{}).Prepare(context.Background(), nil, 0, 1)
 	if !errors.Is(err, caseimport.ErrInvalidInput) {
 		t.Fatalf("error = %v, want %v", err, caseimport.ErrInvalidInput)
 	}
