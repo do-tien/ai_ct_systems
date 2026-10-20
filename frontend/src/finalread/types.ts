@@ -48,12 +48,13 @@ export interface FinalReplacement {
   candidate_decisions: CandidateDecision[]
 }
 
-// GET /reads/final and the PUT /reads/final success envelope.
+// GET /reads/final and the PUT /reads/final success envelope. `reader` is the
+// authenticated owner's display name, preserved exactly as the server returns it.
 export interface FinalRead extends FinalReplacement {
   id: number
   case_id: number
   kind: 'final'
-  reader: 'reader'
+  reader: string
   locked_at: string | null
 }
 

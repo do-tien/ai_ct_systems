@@ -27,13 +27,14 @@ export interface DraftMark {
   mark: InitialMark
 }
 
-// GET /reads/initial response. `locked_at` non-null means the initial read is
-// immutable and later edits belong to the final read.
+// GET /reads/initial response. `reader` is the authenticated owner's display
+// name, preserved exactly as the server returns it. `locked_at` non-null means
+// the initial read is immutable and later edits belong to the final read.
 export interface InitialRead {
   id: number
   case_id: number
   kind: 'initial'
-  reader: 'reader'
+  reader: string
   locked_at: string | null
   marks: InitialMark[]
 }

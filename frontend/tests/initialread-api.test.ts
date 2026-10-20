@@ -23,7 +23,7 @@ const READ = {
   id: 1,
   case_id: 4,
   kind: 'initial',
-  reader: 'reader',
+  reader: 'Bác sĩ A',
   locked_at: null,
   marks: [MARK],
 }
@@ -32,12 +32,23 @@ test('parsesUnlockedAndLockedReadPreservingValues', () => {
   const unlocked = parseInitialRead({ ...READ }, 4)
   assert.equal(unlocked.id, 1)
   assert.equal(unlocked.case_id, 4)
+  assert.equal(unlocked.reader, 'Bác sĩ A')
   assert.equal(unlocked.locked_at, null)
   assert.deepEqual(unlocked.marks[0].p1_mm, [-102.3, 45.1, -180.5])
   assert.equal(unlocked.marks[0].note, null)
 
   const locked = parseInitialRead({ ...READ, locked_at: '2026-10-11T00:00:00Z' }, 4)
   assert.equal(locked.locked_at, '2026-10-11T00:00:00Z')
+})
+
+test('preservesDuplicateOwnerDisplayNames', () => {
+  // Two different users may share a display name; ownership lives in the
+  // server session, so the parser must preserve both names unchanged.
+  const first = parseInitialRead({ ...READ, reader: 'Bác sĩ A' }, 4)
+  const second = parseInitialRead({ ...READ, reader: 'Bác sĩ A' }, 4)
+  assert.equal(first.reader, 'Bác sĩ A')
+  assert.equal(second.reader, 'Bác sĩ A')
+  assert.equal(parseInitialRead({ ...READ, reader: '  Bác sĩ A  ' }, 4).reader, '  Bác sĩ A  ')
 })
 
 test('parsesEmptyMarkList', () => {
@@ -48,7 +59,10 @@ test('parsesEmptyMarkList', () => {
 test('rejectsWrongCaseKindReader', () => {
   assert.throws(() => parseInitialRead({ ...READ }, 5), InitialApiError)
   assert.throws(() => parseInitialRead({ ...READ, kind: 'final' }, 4), InitialApiError)
-  assert.throws(() => parseInitialRead({ ...READ, reader: 'other' }, 4), InitialApiError)
+  assert.throws(() => parseInitialRead({ ...READ, reader: '' }, 4), InitialApiError)
+  assert.throws(() => parseInitialRead({ ...READ, reader: '   ' }, 4), InitialApiError)
+  assert.throws(() => parseInitialRead({ ...READ, reader: 7 }, 4), InitialApiError)
+  assert.throws(() => parseInitialRead({ ...READ, reader: null }, 4), InitialApiError)
   assert.throws(() => parseInitialRead({ ...READ, id: 0 }, 4), InitialApiError)
   assert.throws(() => parseInitialRead([READ], 4), InitialApiError)
 })
