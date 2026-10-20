@@ -513,3 +513,97 @@ button:focus-visible {
     color: #fbbf24;
   }
 }
+
+.auth-loading {
+  margin-bottom: 1.5rem;
+}
+
+.auth-loading p {
+  margin: 0;
+  color: #4b5563;
+}
+
+.auth-failure {
+  margin-bottom: 1.5rem;
+}
+
+.auth-failure button {
+  margin-top: 0.75rem;
+}
+
+.login-panel {
+  max-width: 26rem;
+  margin-bottom: 1.5rem;
+}
+
+.login-field {
+  display: block;
+  margin-bottom: 0.35rem;
+  font-weight: 600;
+}
+
+.login-pin {
+  width: 100%;
+  max-width: 14rem;
+  padding: 0.5rem 0.65rem;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.35em;
+  color: inherit;
+  background: #ffffff;
+  border: 1px solid #9ca3af;
+  border-radius: 6px;
+}
+
+.login-pin:focus-visible {
+  outline: 2px solid #1d4ed8;
+  outline-offset: 2px;
+}
+
+.login-hint {
+  margin: 0.35rem 0 0;
+  color: #4b5563;
+  font-size: 0.9rem;
+}
+
+.login-panel button {
+  margin-top: 1rem;
+}
+
+.user-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 1.5rem;
+  padding: 0.6rem 0.9rem;
+  background: #eef2ff;
+  border: 1px solid #c7d2fe;
+  border-radius: 8px;
+}
+
+.user-bar-name {
+  margin: 0;
+}
+
+.user-bar-logout {
+  padding: 0.35rem 0.85rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  .auth-loading p,
+  .login-hint {
+    color: #9ca3af;
+  }
+
+  .login-pin {
+    background: #14161a;
+    border-color: #4b5563;
+  }
+
+  .user-bar {
+    background: #1e2433;
+    border-color: #334155;
+  }
+}

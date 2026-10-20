@@ -3,6 +3,8 @@
 // safe-message mapping; only the response parsers differ, and those live with
 // each read's own wire module. No raw server message text is ever surfaced.
 
+import { authenticatedFetch } from '../auth/session.ts'
+
 // The same 5-second client budget the case and viewer requests use.
 export const READ_REQUEST_TIMEOUT_MS = 5000
 
@@ -121,7 +123,7 @@ export async function requestReadJson(path: string, options: ReadRequestOptions)
 
   let response: Response
   try {
-    response = await fetch(path, {
+    response = await authenticatedFetch(path, {
       method: options.method,
       headers,
       body: options.body,

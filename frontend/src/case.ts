@@ -2,6 +2,8 @@
 // allowlist (snake_case, eight keys); only those fields are read and anything
 // else the backend may later add -- including any AI field -- is ignored.
 
+import { authenticatedFetch } from './auth/session.ts'
+
 export type CaseState = 'awaiting_read' | 'initial_locked' | 'finalized'
 
 export interface CaseMetadata {
@@ -101,7 +103,7 @@ export async function loadCase(caseId: number, signal: AbortSignal): Promise<Cas
   signal.addEventListener('abort', forwardAbort, { once: true })
   const timeoutId = setTimeout(() => controller.abort(), CASE_REQUEST_TIMEOUT_MS)
   try {
-    const response = await fetch(`/api/cases/${caseId}`, {
+    const response = await authenticatedFetch(`/api/cases/${caseId}`, {
       signal: controller.signal,
       headers: { Accept: 'application/json' },
       cache: 'no-store',

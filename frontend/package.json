@@ -8,6 +8,7 @@
     "typecheck": "tsc --noEmit",
     "build": "npm run typecheck && vite build",
     "test:geometry": "node --experimental-strip-types --test \"tests/*.test.ts\"",
+    "test:auth": "node --experimental-strip-types --test \"tests/auth-*.test.ts\"",
     "test:initialread": "node --experimental-strip-types --test \"tests/initialread-*.test.ts\"",
     "test:upload": "node --experimental-strip-types --test \"tests/upload-*.test.ts\""
   },
