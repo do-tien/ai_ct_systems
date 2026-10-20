@@ -41,7 +41,13 @@ func (s *AuthStore) CreateUser(ctx context.Context, displayName string, pinLooku
 	if err != nil {
 		return auth.User{}, auth.ErrDependency
 	}
-	return auth.User{ID: row.ID, DisplayName: row.DisplayName, DisabledAt: optionalTime(row.DisabledAt)}, nil
+	return auth.User{
+		ID:          row.ID,
+		DisplayName: row.DisplayName,
+		DisabledAt:  optionalTime(row.DisabledAt),
+		CreatedAt:   row.CreatedAt.Time,
+		UpdatedAt:   row.UpdatedAt.Time,
+	}, nil
 }
 
 // ListUsers returns every user, active or disabled, without credential data.
@@ -56,6 +62,8 @@ func (s *AuthStore) ListUsers(ctx context.Context) ([]auth.User, error) {
 			ID:          row.ID,
 			DisplayName: row.DisplayName,
 			DisabledAt:  optionalTime(row.DisabledAt),
+			CreatedAt:   row.CreatedAt.Time,
+			UpdatedAt:   row.UpdatedAt.Time,
 		})
 	}
 	return users, nil

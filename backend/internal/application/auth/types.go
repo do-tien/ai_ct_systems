@@ -59,11 +59,14 @@ func (e *ThrottledError) RetryAfterSeconds() int {
 }
 
 // User is an authentication principal as stored by the backend. DisabledAt is
-// nil for an active user.
+// nil for an active user. CreatedAt and UpdatedAt carry the audit timestamps
+// surfaced by administration listings.
 type User struct {
 	ID          int64
 	DisplayName string
 	DisabledAt  *time.Time
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 // Principal is the authenticated identity carried in a request context.

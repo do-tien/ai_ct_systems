@@ -1,6 +1,7 @@
 package config_test
 
 import (
+	"encoding/base64"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +12,16 @@ import (
 )
 
 const testPassword = "s3cret-value"
+
+func testPepper() string {
+	return base64.RawURLEncoding.EncodeToString([]byte("0123456789abcdef0123456789abcdef"))
+}
+
+func setAuth(t *testing.T) {
+	t.Helper()
+	t.Setenv("AUTH_PIN_PEPPER", testPepper())
+	t.Setenv("AUTH_COOKIE_SECURE", "")
+}
 
 func setPostgres(t *testing.T, overrides map[string]string) {
 	t.Helper()
@@ -52,6 +63,7 @@ func TestLoadPostgresNeedsNoOrthanc(t *testing.T) {
 
 func TestLoadStillRequiresOrthanc(t *testing.T) {
 	setPostgres(t, nil)
+	setAuth(t)
 	clearOrthanc(t)
 
 	_, err := config.Load()
@@ -131,6 +143,7 @@ func setAI(t *testing.T, overrides map[string]string) {
 func loadServerConfig(t *testing.T) (config.Config, error) {
 	t.Helper()
 	setPostgres(t, nil)
+	setAuth(t)
 	setOrthanc(t)
 	return config.Load()
 }
@@ -285,6 +298,109 @@ func TestLoadRejectsInvalidUploadDir(t *testing.T) {
 			})
 			if _, err := loadServerConfig(t); err == nil {
 				t.Fatalf("Load() accepted upload dir %q", uploadDir)
+			}
+		})
+	}
+}
+
+func TestLoadAuthNeedsNoOrthancOrAI(t *testing.T) {
+	setPostgres(t, nil)
+	setAuth(t)
+	clearOrthanc(t)
+	for _, name := range []string{
+		"AI_PYTHON", "AI_BUNDLE_DIR", "AI_JOB_DIR", "AI_TIMEOUT", "AI_DEVICE",
+		"UPLOAD_DIR", "HTTP_ADDR",
+	} {
+		t.Setenv(name, "")
+	}
+
+	settings, err := config.LoadAuth()
+	if err != nil {
+		t.Fatalf("LoadAuth() error = %v", err)
+	}
+	if settings.Postgres.Host != "127.0.0.1" || settings.Postgres.Port != 5432 ||
+		settings.Postgres.Database != "nodule" || settings.Postgres.User != "nodule" ||
+		settings.Postgres.Password != testPassword {
+		t.Fatalf("LoadAuth() Postgres = %+v", settings.Postgres)
+	}
+	if settings.PINPepper != testPepper() {
+		t.Fatal("LoadAuth() did not return the configured pepper")
+	}
+}
+
+func TestLoadAuthRequiresValidPepperWithoutLeakingIt(t *testing.T) {
+	cases := map[string]string{
+		"missing":     "",
+		"not base64":  "this is not base64url!",
+		"short":       base64.RawURLEncoding.EncodeToString([]byte("too-short")),
+		"long":        base64.RawURLEncoding.EncodeToString(make([]byte, 33)),
+		"padded":      base64.URLEncoding.EncodeToString(make([]byte, 32)),
+		"empty bytes": base64.RawURLEncoding.EncodeToString([]byte("")),
+	}
+	for name, pepper := range cases {
+		t.Run(name, func(t *testing.T) {
+			setPostgres(t, nil)
+			t.Setenv("AUTH_PIN_PEPPER", pepper)
+
+			_, err := config.LoadAuth()
+			if err == nil || !strings.Contains(err.Error(), "AUTH_PIN_PEPPER") {
+				t.Fatalf("LoadAuth() error = %v, want AUTH_PIN_PEPPER error", err)
+			}
+			if pepper != "" && strings.Contains(err.Error(), pepper) {
+				t.Fatalf("error leaked the pepper value: %v", err)
+			}
+		})
+	}
+}
+
+func TestLoadRequiresAuthPepper(t *testing.T) {
+	setPostgres(t, nil)
+	setOrthanc(t)
+	setAI(t, nil)
+	t.Setenv("AUTH_PIN_PEPPER", "")
+	t.Setenv("AUTH_COOKIE_SECURE", "")
+
+	if _, err := config.Load(); err == nil || !strings.Contains(err.Error(), "AUTH_PIN_PEPPER") {
+		t.Fatalf("Load() error = %v, want AUTH_PIN_PEPPER error", err)
+	}
+}
+
+func TestLoadReadsAuthCookieSecure(t *testing.T) {
+	cases := map[string]struct {
+		value string
+		want  bool
+		ok    bool
+	}{
+		"default": {value: "", want: false, ok: true},
+		"false":   {value: "false", want: false, ok: true},
+		"true":    {value: "true", want: true, ok: true},
+		"one":     {value: "1", ok: false},
+		"yes":     {value: "yes", ok: false},
+		"upper":   {value: "TRUE", ok: false},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			setPostgres(t, nil)
+			setOrthanc(t)
+			setAI(t, nil)
+			t.Setenv("AUTH_PIN_PEPPER", testPepper())
+			t.Setenv("AUTH_COOKIE_SECURE", tc.value)
+
+			cfg, err := config.Load()
+			if tc.ok {
+				if err != nil {
+					t.Fatalf("Load() error = %v", err)
+				}
+				if cfg.AuthCookieSecure != tc.want {
+					t.Fatalf("AuthCookieSecure = %v, want %v", cfg.AuthCookieSecure, tc.want)
+				}
+				if cfg.AuthPinPepper != testPepper() {
+					t.Fatal("AuthPinPepper not populated on Config")
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), "AUTH_COOKIE_SECURE") {
+				t.Fatalf("Load() error = %v, want AUTH_COOKIE_SECURE error", err)
 			}
 		})
 	}
