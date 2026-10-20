@@ -51,6 +51,12 @@ services:
       ORTHANC_URL: http://orthanc:8042
       ORTHANC_USER: ${ORTHANC_USER:?ORTHANC_USER is required (see .env.example)}
       ORTHANC_PASSWORD: ${ORTHANC_PASSWORD:?ORTHANC_PASSWORD is required (see .env.example)}
+      # Unpadded base64url of exactly 32 bytes, shared by the backend and any
+      # native `userctl` invocation. Generate it per environment (see
+      # docs/pin-authentication.md) and never commit a real value.
+      AUTH_PIN_PEPPER: ${AUTH_PIN_PEPPER:?AUTH_PIN_PEPPER is required (see .env.example)}
+      # Keep false for loopback HTTP only; must be true behind HTTPS.
+      AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-false}
       # Private staging root for the upload API. The container still lacks the
       # required AI_* settings, so this path remains DEFERRED as documented above.
       UPLOAD_DIR: /tmp/nodule-uploads
