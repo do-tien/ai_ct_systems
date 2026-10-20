@@ -12,8 +12,11 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/pressly/goose/v3"
 
+	"nodule-reader/backend/internal/application/auth"
+	"nodule-reader/backend/internal/infrastructure/postgres"
 	"nodule-reader/backend/internal/infrastructure/postgres/lc1db"
 	"nodule-reader/backend/migrations"
 )
@@ -742,5 +745,207 @@ func TestAuthQueryProjections(t *testing.T) {
 				t.Fatalf("%s exposes credential field %s", value.Name(), value.Field(i).Name)
 			}
 		}
+	}
+}
+
+// newAuthStore provisions the runtime pool the same way the service does and
+// returns the PostgreSQL authentication adapter on it.
+func newAuthStore(t *testing.T, h *storageHarness) *postgres.AuthStore {
+	t.Helper()
+	h.migrate(t)
+	h.grantRuntime(t)
+	pool, err := pgxpool.New(context.Background(), h.runtimeDSN)
+	if err != nil {
+		t.Fatalf("runtime pool: %v", err)
+	}
+	t.Cleanup(pool.Close)
+	return postgres.NewAuthStore(pool)
+}
+
+func TestAuthStoreUsers(t *testing.T) {
+	h := newStorageHarness(t)
+	store := newAuthStore(t, h)
+	ctx := context.Background()
+
+	created, err := store.CreateUser(ctx, "Alice", syntheticLookup(11), "encoded-alice")
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	if created.ID <= 0 || created.DisplayName != "Alice" || created.DisabledAt != nil {
+		t.Fatalf("created user = %+v", created)
+	}
+
+	users, err := store.ListUsers(ctx)
+	if err != nil {
+		t.Fatalf("ListUsers: %v", err)
+	}
+	if len(users) != 1 || users[0].ID != created.ID || users[0].DisplayName != "Alice" {
+		t.Fatalf("users = %+v, want the created user", users)
+	}
+
+	found, encoded, err := store.FindActiveUserByPINLookup(ctx, syntheticLookup(11))
+	if err != nil {
+		t.Fatalf("FindActiveUserByPINLookup: %v", err)
+	}
+	if found.ID != created.ID || encoded != "encoded-alice" {
+		t.Fatalf("found = %+v, encoded = %q", found, encoded)
+	}
+	if _, _, err := store.FindActiveUserByPINLookup(ctx, syntheticLookup(12)); !errors.Is(err, auth.ErrUserNotFound) {
+		t.Fatalf("missing lookup error = %v, want user not found", err)
+	}
+
+	if _, err := store.CreateUser(ctx, "Duplicate", syntheticLookup(11), "other"); !errors.Is(err, auth.ErrDuplicatePINLookup) {
+		t.Fatalf("duplicate lookup error = %v, want duplicate sentinel", err)
+	}
+	users, err = store.ListUsers(ctx)
+	if err != nil || len(users) != 1 {
+		t.Fatalf("duplicate create changed the user set: %+v, %v", users, err)
+	}
+}
+
+func TestAuthStoreSessions(t *testing.T) {
+	h := newStorageHarness(t)
+	store := newAuthStore(t, h)
+	ctx := context.Background()
+
+	user, err := store.CreateUser(ctx, "Alice", syntheticLookup(21), "encoded-alice")
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	digest := bytes.Repeat([]byte{0x21}, 32)
+	if err := store.CreateSession(ctx, digest, user.ID, now.Add(8*time.Hour)); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+
+	session, err := store.FindSession(ctx, digest, now)
+	if err != nil {
+		t.Fatalf("FindSession: %v", err)
+	}
+	if session.User.ID != user.ID || session.User.DisplayName != "Alice" {
+		t.Fatalf("session = %+v", session)
+	}
+	if !session.ExpiresAt.Equal(now.Add(8 * time.Hour)) {
+		t.Fatalf("session expiry = %v", session.ExpiresAt)
+	}
+	if _, err := store.FindSession(ctx, digest, now.Add(8*time.Hour)); !errors.Is(err, auth.ErrSessionNotFound) {
+		t.Fatalf("expired session error = %v", err)
+	}
+	if _, err := store.FindSession(ctx, bytes.Repeat([]byte{0x22}, 32), now); !errors.Is(err, auth.ErrSessionNotFound) {
+		t.Fatalf("missing session error = %v", err)
+	}
+
+	if err := store.DeleteSession(ctx, digest); err != nil {
+		t.Fatalf("DeleteSession: %v", err)
+	}
+	if err := store.DeleteSession(ctx, digest); err != nil {
+		t.Fatalf("repeated DeleteSession: %v", err)
+	}
+	if _, err := store.FindSession(ctx, digest, now); !errors.Is(err, auth.ErrSessionNotFound) {
+		t.Fatalf("deleted session error = %v", err)
+	}
+
+	expiredDigest := bytes.Repeat([]byte{0x23}, 32)
+	if err := store.CreateSession(ctx, expiredDigest, user.ID, now.Add(time.Second)); err != nil {
+		t.Fatalf("CreateSession expired: %v", err)
+	}
+	if err := store.DeleteExpiredSessions(ctx, now.Add(2*time.Second)); err != nil {
+		t.Fatalf("DeleteExpiredSessions: %v", err)
+	}
+	if _, err := store.FindSession(ctx, expiredDigest, now.Add(2*time.Second)); !errors.Is(err, auth.ErrSessionNotFound) {
+		t.Fatalf("pruned session error = %v", err)
+	}
+}
+
+func TestAuthStoreRotateIsTransactional(t *testing.T) {
+	h := newStorageHarness(t)
+	store := newAuthStore(t, h)
+	ctx := context.Background()
+
+	user, err := store.CreateUser(ctx, "Alice", syntheticLookup(31), "encoded-old")
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	other, err := store.CreateUser(ctx, "Bob", syntheticLookup(32), "encoded-bob")
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	digest := bytes.Repeat([]byte{0x31}, 32)
+	if err := store.CreateSession(ctx, digest, user.ID, now.Add(time.Hour)); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+
+	if err := store.RotatePIN(ctx, user.ID, syntheticLookup(33), "encoded-new"); err != nil {
+		t.Fatalf("RotatePIN: %v", err)
+	}
+	if _, _, err := store.FindActiveUserByPINLookup(ctx, syntheticLookup(31)); !errors.Is(err, auth.ErrUserNotFound) {
+		t.Fatalf("old lookup error = %v", err)
+	}
+	if _, encoded, err := store.FindActiveUserByPINLookup(ctx, syntheticLookup(33)); err != nil || encoded != "encoded-new" {
+		t.Fatalf("new lookup = %q, %v", encoded, err)
+	}
+	if _, err := store.FindSession(ctx, digest, now); !errors.Is(err, auth.ErrSessionNotFound) {
+		t.Fatalf("old session survived rotation: %v", err)
+	}
+
+	// A username collision must roll back the credential update and the session
+	// deletion.
+	collisionDigest := bytes.Repeat([]byte{0x32}, 32)
+	if err := store.CreateSession(ctx, collisionDigest, user.ID, now.Add(time.Hour)); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	if err := store.RotatePIN(ctx, user.ID, syntheticLookup(32), "encoded-collision"); !errors.Is(err, auth.ErrDuplicatePINLookup) {
+		t.Fatalf("collision error = %v", err)
+	}
+	if _, encoded, err := store.FindActiveUserByPINLookup(ctx, syntheticLookup(33)); err != nil || encoded != "encoded-new" {
+		t.Fatalf("collision changed Alice's credential: %q, %v", encoded, err)
+	}
+	if _, encoded, err := store.FindActiveUserByPINLookup(ctx, syntheticLookup(32)); err != nil || encoded != "encoded-bob" {
+		t.Fatalf("collision changed Bob's credential: %q, %v", encoded, err)
+	}
+	if _, err := store.FindSession(ctx, collisionDigest, now); err != nil {
+		t.Fatalf("collision revoked a session: %v", err)
+	}
+
+	if err := store.RotatePIN(ctx, other.ID+1000, syntheticLookup(34), "encoded-missing"); !errors.Is(err, auth.ErrUserNotFound) {
+		t.Fatalf("missing user rotation error = %v", err)
+	}
+}
+
+func TestAuthStoreRevokeIsTransactionalAndIdempotent(t *testing.T) {
+	h := newStorageHarness(t)
+	store := newAuthStore(t, h)
+	ctx := context.Background()
+
+	user, err := store.CreateUser(ctx, "Alice", syntheticLookup(41), "encoded-alice")
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	digest := bytes.Repeat([]byte{0x41}, 32)
+	if err := store.CreateSession(ctx, digest, user.ID, now.Add(time.Hour)); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+
+	if err := store.RevokeUser(ctx, user.ID); err != nil {
+		t.Fatalf("RevokeUser: %v", err)
+	}
+	if _, _, err := store.FindActiveUserByPINLookup(ctx, syntheticLookup(41)); !errors.Is(err, auth.ErrUserNotFound) {
+		t.Fatalf("revoked user still resolves: %v", err)
+	}
+	if _, err := store.FindSession(ctx, digest, now); !errors.Is(err, auth.ErrSessionNotFound) {
+		t.Fatalf("revocation did not delete the session: %v", err)
+	}
+	users, err := store.ListUsers(ctx)
+	if err != nil || len(users) != 1 || users[0].DisabledAt == nil {
+		t.Fatalf("revoked user projection = %+v, %v", users, err)
+	}
+
+	if err := store.RevokeUser(ctx, user.ID); err != nil {
+		t.Fatalf("repeated RevokeUser: %v", err)
+	}
+	if err := store.RevokeUser(ctx, user.ID+1000); !errors.Is(err, auth.ErrUserNotFound) {
+		t.Fatalf("missing user revocation error = %v", err)
 	}
 }
