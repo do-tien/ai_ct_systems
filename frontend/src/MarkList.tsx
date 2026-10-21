@@ -43,10 +43,14 @@ export default function MarkList({ draft, editable, onFocus, onRemove }: MarkLis
         return (
           <li key={entry.localId} className="mark-row">
             <button type="button" className="mark-focus" onClick={() => onFocus(entry.localId)}>
-              <span className="mark-index">Dấu {index + 1}</span>
-              <span className="mark-diameter">{formatDiameter(entry.mark.diameter_mm)}</span>
-              {label !== null && <span className="mark-origin">{label}</span>}
-              {entry.mark.note !== null && entry.mark.note !== '' && <span className="mark-note">{entry.mark.note}</span>}
+              <span className="mark-focus-head">
+                <span className="mark-index">Dấu {index + 1}</span>
+                <span className="mark-diameter">{formatDiameter(entry.mark.diameter_mm)}</span>
+                {label !== null && <span className="mark-origin">{label}</span>}
+              </span>
+              {entry.mark.note !== null && entry.mark.note !== '' && (
+                <span className="mark-note">{entry.mark.note}</span>
+              )}
             </button>
             {editable && (
               <button

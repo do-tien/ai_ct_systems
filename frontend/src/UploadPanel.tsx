@@ -111,85 +111,103 @@ export default function UploadPanel({ onOpenCase }: UploadPanelProps) {
   }, [selected])
 
   const selectedBytes = selected.reduce((sum, file) => sum + file.size, 0)
+  const hasSession = state.session !== null
+  const selecting = selected.length > 0 || busy
+
+  const pickers = (
+    <div className="upload-picker">
+      <label className={busy ? 'button-secondary file-button disabled' : 'button-secondary file-button'}>
+        Chọn file
+        <input
+          type="file"
+          multiple
+          className="visually-hidden"
+          disabled={busy}
+          onChange={(event) => onFilesChosen(event.target.files)}
+        />
+      </label>
+      <label className={busy ? 'button-quiet file-button disabled' : 'button-quiet file-button'}>
+        Chọn thư mục
+        <input
+          type="file"
+          multiple
+          className="visually-hidden"
+          disabled={busy}
+          onChange={(event) => onFilesChosen(event.target.files)}
+          {...({ webkitdirectory: '', directory: '' } as Record<string, string>)}
+        />
+      </label>
+    </div>
+  )
 
   return (
     <section className="panel upload-panel" aria-labelledby="upload-heading">
       <div className="panel-heading">
         <div>
           <h2 id="upload-heading">Nhập ca CT</h2>
-          <p className="panel-sub">Dữ liệu DICOM của một series CT; ca được tạo sau khi bạn xác nhận series.</p>
+          <p className="panel-sub">Dữ liệu DICOM của một series CT; ca chỉ được tạo sau khi bạn xác nhận series.</p>
         </div>
       </div>
 
-      <div
-        className={dragging ? 'dropzone dropzone-active' : 'dropzone'}
-        onDragOver={(event) => {
-          if (busy) {
-            return
-          }
-          event.preventDefault()
-          setDragging(true)
-        }}
-        onDragLeave={() => setDragging(false)}
-        onDrop={(event) => {
-          event.preventDefault()
-          setDragging(false)
-          if (!busy) {
-            onFilesChosen(event.dataTransfer.files)
-          }
-        }}
-      >
-        <p className="dropzone-title">Kéo thả file DICOM hoặc archive vào đây</p>
-        <p className="dropzone-hint">hoặc chọn từ máy</p>
-        <div className="upload-picker">
-          <label className={busy ? 'button-secondary file-button disabled' : 'button-secondary file-button'}>
-            Chọn file
-            <input
-              type="file"
-              multiple
-              className="visually-hidden"
-              disabled={busy}
-              onChange={(event) => onFilesChosen(event.target.files)}
-            />
-          </label>
-          <label className={busy ? 'button-quiet file-button disabled' : 'button-quiet file-button'}>
-            Chọn thư mục
-            <input
-              type="file"
-              multiple
-              className="visually-hidden"
-              disabled={busy}
-              onChange={(event) => onFilesChosen(event.target.files)}
-              {...({ webkitdirectory: '', directory: '' } as Record<string, string>)}
-            />
-          </label>
+      {!hasSession && !selecting && (
+        <div
+          className={dragging ? 'dropzone dropzone-active' : 'dropzone'}
+          onDragOver={(event) => {
+            if (busy) {
+              return
+            }
+            event.preventDefault()
+            setDragging(true)
+          }}
+          onDragLeave={() => setDragging(false)}
+          onDrop={(event) => {
+            event.preventDefault()
+            setDragging(false)
+            if (!busy) {
+              onFilesChosen(event.dataTransfer.files)
+            }
+          }}
+        >
+          <p className="dropzone-title">Kéo thả file DICOM hoặc archive vào đây</p>
+          <p className="dropzone-hint">hoặc chọn từ máy</p>
+          {pickers}
         </div>
-      </div>
+      )}
 
-      <p className="upload-summary">
-        {selected.length === 0
-          ? 'Chưa chọn file nào.'
-          : `Đã chọn ${selected.length} file (${formatBytes(selectedBytes)}).`}
-      </p>
+      {!hasSession && selecting && (
+        <div className={dragging ? 'upload-selection dropzone-active' : 'upload-selection'}>
+          <p className="upload-selection-title">
+            {selected.length === 0
+              ? 'Đang chuẩn bị dữ liệu đã chọn…'
+              : `Đã chọn ${selected.length} file (${formatBytes(selectedBytes)}).`}
+          </p>
+          {pickers}
+        </div>
+      )}
 
-      <div className="upload-actions">
-        <button type="button" className="button-primary" onClick={startUpload} disabled={busy || selected.length === 0}>
-          Tải lên và kiểm tra
-        </button>
-        {busy && (
-          <button
-            type="button"
-            className="button-quiet"
-            onClick={() => controllerRef.current?.reset()}
-            disabled={state.phase === 'confirming'}
-          >
-            Hủy
-          </button>
-        )}
-      </div>
+      {!hasSession && (
+        <div className="upload-actions">
+          {busy ? (
+            <button type="button" className="button-secondary" onClick={() => controllerRef.current?.reset()}>
+              Hủy tải lên
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="button-primary"
+              onClick={startUpload}
+              disabled={selected.length === 0}
+            >
+              Tải lên và kiểm tra
+            </button>
+          )}
+        </div>
+      )}
 
       <p className="upload-phase" role="status">
-        {PHASE_LABELS[state.phase]}
+        {state.phase === 'idle' && selected.length > 0
+          ? 'Sẵn sàng tải lên khi bạn bấm “Tải lên và kiểm tra”.'
+          : PHASE_LABELS[state.phase]}
       </p>
 
       {state.progress !== null && (
@@ -212,62 +230,83 @@ export default function UploadPanel({ onOpenCase }: UploadPanelProps) {
             {state.session.skipped_files > 0 ? `, bỏ qua ${state.session.skipped_files} mục chỉ mục/phụ` : ''}
             {state.restored ? ' (khôi phục sau khi tải lại trang)' : ''}.
           </p>
-          <ul className="upload-series">
-            {state.session.series.map((option) => {
-              const disabled = !option.suitable || busy
-              return (
-                <li key={option.id} className={option.suitable ? 'series-option' : 'series-option series-option-disabled'}>
-                  <label>
-                    <input
-                      type="radio"
-                      name="upload-series"
-                      value={option.id}
-                      checked={state.selectedSeriesId === option.id}
-                      disabled={disabled}
-                      onChange={() => controllerRef.current?.choose(option.id)}
-                    />
-                    <span>
-                      Series {option.index} · {option.modality || 'không rõ modality'} ·{' '}
-                      {option.instance_count} lát cắt
-                    </span>
-                  </label>
-                  {!option.suitable && (
-                    <span className="upload-reason">
-                      {option.reason_code === null
-                        ? 'Series không phù hợp.'
-                        : (REASON_LABELS[option.reason_code] ?? 'Series không phù hợp.')}
-                    </span>
-                  )}
-                </li>
-              )
-            })}
-          </ul>
+          <fieldset className="upload-series-set">
+            <legend className="visually-hidden">Chọn series để mở ca</legend>
+            <ul className="upload-series">
+              {state.session.series.map((option) => {
+                const disabled = !option.suitable || busy
+                const selectedOption = state.selectedSeriesId === option.id
+                return (
+                  <li
+                    key={option.id}
+                    className={[
+                      'series-option',
+                      selectedOption ? 'series-option-selected' : '',
+                      option.suitable ? '' : 'series-option-disabled',
+                    ]
+                      .filter(Boolean)
+                      .join(' ')}
+                  >
+                    <label>
+                      <input
+                        type="radio"
+                        name="upload-series"
+                        value={option.id}
+                        checked={selectedOption}
+                        disabled={disabled}
+                        onChange={() => controllerRef.current?.choose(option.id)}
+                      />
+                      <span>
+                        <span className="series-option-title">
+                          Series {option.index} · {option.modality || 'không rõ modality'} ·{' '}
+                          {option.instance_count} lát cắt
+                        </span>
+                        {!option.suitable && (
+                          <span className="upload-reason">
+                            {option.reason_code === null
+                              ? 'Series không phù hợp.'
+                              : (REASON_LABELS[option.reason_code] ?? 'Series không phù hợp.')}
+                          </span>
+                        )}
+                      </span>
+                    </label>
+                  </li>
+                )
+              })}
+            </ul>
+          </fieldset>
         </>
       )}
 
       {state.phase === 'choosing' && (
-        <button
-          type="button"
-          className="button-primary"
-          onClick={() => void controllerRef.current?.confirmSelection()}
-          disabled={state.selectedSeriesId === null}
-        >
-          Mở ca
-        </button>
+        <div className="upload-actions">
+          <button
+            type="button"
+            className="button-primary"
+            onClick={() => void controllerRef.current?.confirmSelection()}
+            disabled={state.selectedSeriesId === null}
+          >
+            Tạo ca từ series đã chọn
+          </button>
+        </div>
       )}
 
       {state.phase === 'confirming' && <p className="upload-summary">Đang tạo ca từ series đã chọn…</p>}
 
       {state.phase === 'uncertain' && (
-        <button type="button" className="button-secondary" onClick={() => void controllerRef.current?.reconcile()}>
-          Kiểm tra kết quả
-        </button>
+        <div className="upload-actions">
+          <button type="button" className="button-secondary" onClick={() => void controllerRef.current?.reconcile()}>
+            Kiểm tra kết quả
+          </button>
+        </div>
       )}
 
       {state.session !== null && !busy && (
-        <button type="button" className="button-quiet" onClick={() => void controllerRef.current?.discard()}>
-          Bỏ lượt tải lên này
-        </button>
+        <div className="upload-actions">
+          <button type="button" className="button-quiet" onClick={() => void controllerRef.current?.discard()}>
+            Bỏ lượt tải lên này
+          </button>
+        </div>
       )}
 
       {state.error !== null && (

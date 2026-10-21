@@ -642,67 +642,93 @@ export default function Viewer({ caseMetadata, openedAt, onRetry, initialRead, f
           <h2 id="viewer-heading">Ảnh CT trục</h2>
           <p className="panel-sub">Nghiên cứu; không có lớp phủ AI và không dùng để chẩn đoán.</p>
         </div>
-        <span className="viewer-counter" aria-live="polite">
-          {usable ? `${sliceIndex + 1} / ${total}` : '—'}
-        </span>
+        <details className="shortcut-help">
+          <summary>Phím tắt</summary>
+          <p className="viewer-hint">
+            <span>
+              <kbd>←</kbd>
+              <kbd>→</kbd> đổi lát
+            </span>
+            <span>
+              <kbd>W</kbd> cửa sổ/mức
+            </span>
+            <span>
+              <kbd>Z</kbd> thu phóng
+            </span>
+            {hasRead && (
+              <span>
+                <kbd>M</kbd> đo nốt
+              </span>
+            )}
+          </p>
+        </details>
       </div>
 
-      <div className="viewer-toolbar" role="group" aria-label="Chế độ chuột">
-        <button
-          type="button"
-          className={mode === 'window' ? 'active' : ''}
-          aria-pressed={mode === 'window'}
-          disabled={!usable}
-          onClick={() => setMode('window')}
-        >
-          Cửa sổ / mức
-        </button>
-        <button
-          type="button"
-          className={mode === 'zoom' ? 'active' : ''}
-          aria-pressed={mode === 'zoom'}
-          disabled={!usable}
-          onClick={() => setMode('zoom')}
-        >
-          Thu phóng
-        </button>
-        {hasRead && (
+      <div className="viewer-toolbar">
+        <div className="tool-group" role="group" aria-label="Chế độ chuột">
           <button
             type="button"
-            className={mode === 'measure' ? 'active' : ''}
-            aria-pressed={mode === 'measure'}
-            disabled={!usable || !canEdit}
-            onClick={() => setMode('measure')}
+            className={mode === 'window' ? 'active' : ''}
+            aria-pressed={mode === 'window'}
+            disabled={!usable}
+            onClick={() => setMode('window')}
           >
-            Đo nốt
+            Cửa sổ / mức
           </button>
-        )}
-        <span className="viewer-spacer" />
-        <button type="button" disabled={!usable || sliceIndex <= 0} onClick={() => step(-1)}>
-          Lát trước
-        </button>
-        <button type="button" disabled={!usable || sliceIndex >= total - 1} onClick={() => step(1)}>
-          Lát sau
-        </button>
-      </div>
+          <button
+            type="button"
+            className={mode === 'zoom' ? 'active' : ''}
+            aria-pressed={mode === 'zoom'}
+            disabled={!usable}
+            onClick={() => setMode('zoom')}
+          >
+            Thu phóng
+          </button>
+          {hasRead && (
+            <button
+              type="button"
+              className={mode === 'measure' ? 'active' : ''}
+              aria-pressed={mode === 'measure'}
+              disabled={!usable || !canEdit}
+              onClick={() => setMode('measure')}
+            >
+              Đo nốt
+            </button>
+          )}
+        </div>
 
-      <p className="viewer-hint">
-        <span>
-          <kbd>←</kbd>
-          <kbd>→</kbd> đổi lát
-        </span>
-        <span>
-          <kbd>W</kbd> cửa sổ/mức
-        </span>
-        <span>
-          <kbd>Z</kbd> thu phóng
-        </span>
-        {hasRead && (
-          <span>
-            <kbd>M</kbd> đo nốt
+        <div className="tool-group" role="group" aria-label="Điều hướng lát cắt">
+          <button type="button" disabled={!usable || sliceIndex <= 0} onClick={() => step(-1)}>
+            <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false">
+              <path
+                d="M10 3 5 8l5 5"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+            Lát trước
+          </button>
+          <span className="viewer-counter" aria-live="polite">
+            {usable ? `${sliceIndex + 1} / ${total}` : '—'}
           </span>
-        )}
-      </p>
+          <button type="button" disabled={!usable || sliceIndex >= total - 1} onClick={() => step(1)}>
+            Lát sau
+            <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false">
+              <path
+                d="M6 3l5 5-5 5"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </button>
+        </div>
+      </div>
 
       <div
         className="viewer-stage"

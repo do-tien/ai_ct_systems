@@ -1,5 +1,4 @@
-import { useState } from 'react'
-
+import ActionConfirm from './ui/ActionConfirm.tsx'
 import type { WorkflowPhase } from './initialread/types.ts'
 
 // Save/submit controls and the honest persistence status. Presentation only:
@@ -44,7 +43,6 @@ function statusText(
 }
 
 export default function SubmitBar({ phase, error, dirty, busy, drawing, canEdit, onSave, onSubmit }: SubmitBarProps) {
-  const [confirming, setConfirming] = useState(false)
   const status = statusText(phase, dirty, error)
   const locked = phase === 'locked'
   const controlsDisabled = !canEdit || busy || drawing
@@ -55,36 +53,19 @@ export default function SubmitBar({ phase, error, dirty, busy, drawing, canEdit,
         <span className={`chip chip-${status.tone}`}>{drawing ? 'Đang vẽ dấu…' : status.text}</span>
       </p>
 
-      {!locked && !confirming && (
+      {!locked && (
         <div className="submit-actions">
           <button type="button" className="button-secondary" onClick={onSave} disabled={controlsDisabled}>
             Lưu nháp
           </button>
-          <button type="button" className="button-primary" onClick={() => setConfirming(true)} disabled={controlsDisabled}>
-            Nộp và khóa
-          </button>
-        </div>
-      )}
-
-      {!locked && confirming && (
-        <div className="confirm-card" role="alertdialog" aria-label="Xác nhận nộp bản đọc đầu">
-          <p>Nộp sẽ khóa bản đọc đầu và không thể sửa lại; các chỉnh sửa sau thuộc bản cuối. Tiếp tục?</p>
-          <div className="submit-actions">
-            <button
-              type="button"
-              className="button-primary"
-              onClick={() => {
-                setConfirming(false)
-                onSubmit()
-              }}
-              disabled={controlsDisabled}
-            >
-              Xác nhận nộp và khóa
-            </button>
-            <button type="button" className="button-quiet" onClick={() => setConfirming(false)}>
-              Hủy
-            </button>
-          </div>
+          <ActionConfirm
+            triggerLabel="Nộp và khóa"
+            heading="Nộp và khóa bản đọc đầu"
+            description="Bản đọc đầu sẽ bị khóa và không sửa được nữa; các chỉnh sửa sau thuộc bản cuối. Tiếp tục?"
+            confirmLabel="Xác nhận nộp và khóa"
+            disabled={controlsDisabled}
+            onConfirm={onSubmit}
+          />
         </div>
       )}
     </div>

@@ -1,0 +1,407 @@
+/* Application shell: header, page frame, footer, shared surfaces (panel, chip,
+   notice, inline error), the login gate and the session/user bar. The same
+   classes serve both contexts; the dark palette comes from .app-workspace. */
+
+.app {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+.app-header {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-header);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-3);
+  min-height: var(--header-height);
+  padding: 0.45rem clamp(0.75rem, 3vw, 1.5rem);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  color: inherit;
+  text-decoration: none;
+}
+
+.brand-mark {
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 700;
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+}
+
+.brand-text strong {
+  display: block;
+  font-size: 0.95rem;
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+}
+
+.brand-text small {
+  display: block;
+  color: var(--muted);
+  font-size: 0.72rem;
+  line-height: 1.3;
+}
+
+.app-header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  min-width: 0;
+}
+
+/* Research-only badge: always visible, never replaced by the user bar. */
+.app-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid var(--warning-border);
+  background: var(--warning-soft);
+  color: var(--warning);
+  font-size: 0.74rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.page {
+  flex: 1 1 auto;
+  width: 100%;
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: var(--space-4) clamp(0.75rem, 2.5vw, 1.75rem) var(--space-6);
+}
+
+/* Skip-link target: focus lands here and then moves into the content. */
+.page:focus {
+  outline: none;
+}
+
+.app-footer {
+  width: 100%;
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 0 clamp(0.75rem, 2.5vw, 1.75rem) var(--space-5);
+  color: var(--muted);
+}
+
+.footer-note {
+  margin: 0 0 var(--space-2);
+  font-size: 0.78rem;
+  max-width: 90ch;
+}
+
+/* --- shared surfaces ---------------------------------------------------- */
+
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4);
+  box-shadow: var(--shadow-sm);
+}
+
+.panel-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.panel-heading > div {
+  min-width: 0;
+}
+
+.panel-sub {
+  margin: 0.15rem 0 0;
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
+.eyebrow {
+  margin: 0 0 0.2rem;
+  color: var(--accent-strong);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.count-chip {
+  flex: 0 0 auto;
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* --- status chips and messages ------------------------------------------ */
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.15rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface-muted);
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.chip-neutral {
+  background: var(--surface-muted);
+  border-color: var(--border);
+  color: var(--muted);
+}
+
+.chip-info {
+  background: var(--info-soft);
+  border-color: var(--info-border);
+  color: var(--info);
+}
+
+.chip-success {
+  background: var(--success-soft);
+  border-color: var(--success-border);
+  color: var(--success);
+}
+
+.chip-warning {
+  background: var(--warning-soft);
+  border-color: var(--warning-border);
+  color: var(--warning);
+}
+
+.chip-danger {
+  background: var(--danger-soft);
+  border-color: var(--danger-border);
+  color: var(--danger);
+}
+
+.notice {
+  margin: 0 0 var(--space-3);
+  padding: 0.55rem 0.75rem;
+  border-left: 3px solid var(--warning);
+  background: var(--warning-soft);
+  color: var(--warning);
+  border-radius: 6px;
+  font-size: 0.88rem;
+}
+
+.notice-small {
+  font-size: 0.8rem;
+  margin-bottom: var(--space-2);
+}
+
+.error {
+  margin: var(--space-3) 0;
+  padding: 0.55rem 0.75rem;
+  border-left: 3px solid var(--danger);
+  background: var(--danger-soft);
+  color: var(--danger);
+  border-radius: 6px;
+  font-size: 0.88rem;
+}
+
+.status-line {
+  margin: var(--space-2) 0;
+  padding: 0.5rem 0.7rem;
+  border-radius: 6px;
+  font-size: 0.88rem;
+}
+
+.status-line-warning {
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+
+/* --- auth / user -------------------------------------------------------- */
+
+.auth-loading,
+.auth-failure {
+  max-width: 32rem;
+  margin: 0 auto;
+}
+
+.auth-loading p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.auth-failure button {
+  margin-top: var(--space-3);
+}
+
+.login-panel {
+  max-width: 26rem;
+  margin: clamp(1rem, 6vh, 3rem) auto 0;
+  padding: var(--space-5);
+  box-shadow: var(--shadow-md);
+}
+
+.login-panel h1 {
+  margin-bottom: var(--space-1);
+}
+
+.login-field {
+  display: block;
+  margin: 0 0 var(--space-1);
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.login-pin {
+  width: 100%;
+  max-width: 16rem;
+  font-size: 1.1rem;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.4em;
+}
+
+.login-hint {
+  margin: 0.35rem 0 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.login-submit {
+  width: 100%;
+  margin-top: var(--space-3);
+}
+
+.user-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.user-avatar {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-border);
+  color: var(--accent-strong);
+  font-weight: 700;
+  font-size: 0.82rem;
+}
+
+.user-bar-name {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.2;
+  min-width: 0;
+}
+
+.user-bar-name small {
+  color: var(--muted);
+  font-size: 0.68rem;
+}
+
+.user-bar-name strong {
+  font-size: 0.88rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.user-bar-logout {
+  min-height: 2.4rem;
+  padding: 0.2rem 0.6rem;
+  font-size: 0.8rem;
+}
+
+/* --- diagnostics -------------------------------------------------------- */
+.diagnostics summary {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.4rem;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.diagnostics .status-table {
+  margin-top: var(--space-2);
+  max-width: 30rem;
+}
+
+.status-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: var(--space-3);
+  font-size: 0.84rem;
+}
+
+.status-table th,
+.status-table td {
+  text-align: left;
+  padding: 0.45rem 0.6rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.status {
+  font-weight: 600;
+}
+
+.status-ok {
+  color: var(--success);
+}
+
+.status-unavailable {
+  color: var(--danger);
+}
+
+.status-loading,
+.status-unknown {
+  color: var(--muted);
+}
+
+@media (max-width: 640px) {
+  .app-header {
+    align-items: flex-start;
+  }
+
+  .brand-text small {
+    display: none;
+  }
+
+  .user-bar-name small {
+    display: none;
+  }
+
+  .app-header-actions {
+    gap: var(--space-2);
+  }
+}

@@ -121,6 +121,9 @@ export default function CaseHeader({ caseMetadata, stage }: CaseHeaderProps) {
               <strong>{step.label}</strong>
               <small>{step.hint}</small>
             </span>
+            <span className="visually-hidden">
+              {step.state === 'done' ? 'Đã hoàn tất' : step.state === 'current' ? 'Đang thực hiện' : 'Chưa tới'}
+            </span>
           </li>
         ))}
       </ol>

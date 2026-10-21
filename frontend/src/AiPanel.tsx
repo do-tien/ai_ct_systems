@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import type { AISessionState } from './finalread/aiSession.ts'
 import type { CandidateDecision } from './finalread/types.ts'
@@ -67,14 +67,30 @@ export default function AiPanel({
 }: AiPanelProps) {
   const [confirmingId, setConfirmingId] = useState<string | null>(null)
   const [reason, setReason] = useState('')
+  const reasonRef = useRef<HTMLInputElement>(null)
+  const dismissRefs = useRef(new Map<string, HTMLButtonElement | null>())
 
   const projection = state.projection
   const byId = new Map(decisions.map((decision) => [decision.candidate_id, decision]))
   const chip = statusChip(state)
 
+  // The editor replaces the quiet trigger, so move focus into the field and
+  // give it back on cancel.
+  useEffect(() => {
+    if (confirmingId !== null) {
+      reasonRef.current?.focus()
+    }
+  }, [confirmingId])
+
   const startDismiss = (candidateId: string): void => {
     setConfirmingId(candidateId)
     setReason('')
+  }
+
+  const cancelDismiss = (candidateId: string): void => {
+    setConfirmingId(null)
+    setReason('')
+    dismissRefs.current.get(candidateId)?.focus()
   }
 
   const confirmDismiss = (candidateId: string): void => {
@@ -124,10 +140,13 @@ export default function AiPanel({
 
       {projection !== null && projection.status === 'succeeded' && (
         <>
-          <p className="ai-provenance">
-            Model {projection.model.bundle} v{projection.model.bundle_version} · ngưỡng điểm detector{' '}
-            {projection.model.score_threshold} · thiết bị {projection.resources.device}
-          </p>
+          <details className="ai-provenance">
+            <summary>Thông tin mô hình</summary>
+            <p>
+              Model {projection.model.bundle} v{projection.model.bundle_version} · ngưỡng điểm detector{' '}
+              {projection.model.score_threshold} · thiết bị {projection.resources.device}
+            </p>
+          </details>
           {projection.candidates.length === 0 ? (
             <p className="panel-sub">
               AI không phát hiện ứng viên nào trong ca này. Kết quả rỗng hợp lệ; không chứng minh là không có nốt.
@@ -137,18 +156,26 @@ export default function AiPanel({
               {projection.candidates.map((candidate, index) => {
                 const decision = byId.get(candidate.id)
                 const linked = linkedCandidates.has(candidate.id)
+                const decided = decision !== undefined
                 return (
                   <li key={candidate.id} className="candidate-row">
                     <div className="candidate-summary">
                       <span className="candidate-index">Ứng viên {index + 1}</span>
                       <span className="candidate-score">Điểm {candidate.score.toFixed(2)}</span>
                       <span className="candidate-size">{candidateSize(candidate.size_mm)}</span>
-                      {decisionText(decision) !== null && (
-                        <span className={`chip chip-${decision?.decision === 'accepted' ? 'success' : 'neutral'}`}>
-                          {decisionText(decision)}
-                        </span>
-                      )}
                     </div>
+
+                    {(decided || linked) && (
+                      <p className="candidate-state">
+                        {decided ? (
+                          <span className={`chip chip-${decision.decision === 'accepted' ? 'success' : 'neutral'}`}>
+                            {decisionText(decision)}
+                          </span>
+                        ) : (
+                          <span className="chip chip-info">Đã thêm vào dấu nốt</span>
+                        )}
+                      </p>
+                    )}
 
                     <div className="candidate-actions">
                       <button type="button" className="button-secondary" onClick={() => onFocus(candidate.id)}>
@@ -160,17 +187,25 @@ export default function AiPanel({
                         </button>
                       )}
                       {canDecide && confirmingId !== candidate.id && (
-                        <button type="button" className="button-quiet" onClick={() => startDismiss(candidate.id)}>
+                        <button
+                          ref={(element) => {
+                            dismissRefs.current.set(candidate.id, element)
+                          }}
+                          type="button"
+                          className="button-quiet"
+                          onClick={() => startDismiss(candidate.id)}
+                        >
                           Bỏ qua…
                         </button>
                       )}
                     </div>
 
                     {canDecide && confirmingId === candidate.id && (
-                      <div className="confirm-card" role="alertdialog" aria-label="Xác nhận bỏ qua ứng viên">
+                      <div className="confirm-card" role="group" aria-label="Bỏ qua ứng viên">
                         <label className="field">
                           <span>Lý do bỏ qua</span>
                           <input
+                            ref={reasonRef}
                             type="text"
                             value={reason}
                             onChange={(event) => setReason(event.target.value)}
@@ -186,7 +221,7 @@ export default function AiPanel({
                           >
                             Xác nhận bỏ qua
                           </button>
-                          <button type="button" className="button-quiet" onClick={() => setConfirmingId(null)}>
+                          <button type="button" className="button-quiet" onClick={() => cancelDismiss(candidate.id)}>
                             Hủy
                           </button>
                         </div>

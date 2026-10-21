@@ -1,0 +1,620 @@
+/* Dark case workspace: compact case bar, image-first grid, a fixed-width
+   sidebar for reading data and workflow actions, and the viewer controls. The
+   CT canvas stays pure black; the dark palette only removes glare around it. */
+
+.case-workspace {
+  display: flex;
+  flex-direction: column;
+}
+
+/* --- compact case bar --------------------------------------------------- */
+
+.case-header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+.case-header-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.back-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  min-height: 2.4rem;
+  color: var(--muted);
+  font-size: 0.84rem;
+  text-decoration: none;
+}
+
+.back-link:hover {
+  color: var(--accent-strong);
+}
+
+.case-title-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.15rem 1rem;
+}
+
+.case-title {
+  margin: 0;
+  font-size: clamp(1.2rem, 1.8vw, 1.5rem);
+}
+
+.case-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.15rem 0.9rem;
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.case-uid {
+  max-width: 42ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+}
+
+/* Three connected segments: number/check plus a text state, so the current
+   step is never communicated by colour alone. */
+.stepper {
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--border);
+  overflow: hidden;
+}
+
+.step {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  min-width: 0;
+  padding: 0.45rem 0.65rem;
+  background: var(--surface);
+}
+
+.step-current {
+  background: var(--accent-soft);
+}
+
+.step-index {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 50%;
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.step-current .step-index {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+}
+
+.step-done .step-index {
+  background: var(--success-soft);
+  border-color: var(--success-border);
+  color: var(--success);
+}
+
+.step-text {
+  min-width: 0;
+}
+
+.step-text strong {
+  display: block;
+  font-size: 0.84rem;
+  line-height: 1.3;
+}
+
+.step-text small {
+  display: block;
+  color: var(--muted);
+  font-size: 0.74rem;
+  line-height: 1.3;
+}
+
+.step-pending .step-text strong {
+  color: var(--muted);
+}
+
+/* --- image-first grid --------------------------------------------------- */
+
+.case-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--sidebar-width);
+  gap: var(--space-4);
+  align-items: start;
+}
+
+.case-main {
+  min-width: 0;
+}
+
+.case-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+  position: sticky;
+  top: calc(var(--header-height) + var(--space-3));
+  max-height: calc(100dvh - var(--header-height) - var(--space-5));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-bottom: 0.25rem;
+}
+
+.read-panel .mark-list {
+  margin-top: var(--space-3);
+}
+
+/* Keeps save and the irreversible action visible while the sidebar scrolls. */
+.workflow-actions {
+  position: sticky;
+  bottom: 0;
+  margin-top: var(--space-3);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+
+/* --- viewer ------------------------------------------------------------- */
+
+.viewer {
+  padding: var(--space-3);
+}
+
+.viewer-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+.tool-group {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-muted);
+}
+
+.tool-group button {
+  min-height: 2.5rem;
+  padding: 0.2rem 0.7rem;
+  font-size: 0.83rem;
+  border-color: transparent;
+  background: transparent;
+  color: var(--fg);
+}
+
+.tool-group button:hover:not(:disabled) {
+  background: var(--surface);
+}
+
+.tool-group button.active,
+.tool-group button[aria-pressed='true'] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+  font-weight: 600;
+}
+
+.viewer-counter {
+  min-width: 4.5rem;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  font-size: 0.86rem;
+}
+
+.shortcut-help {
+  margin-left: auto;
+}
+
+.shortcut-help summary {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.4rem;
+  padding: 0 0.5rem;
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.shortcut-help .viewer-hint {
+  margin: 0.25rem 0 0;
+}
+
+.viewer-hint {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.9rem;
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
+.viewer-stage {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--radius-md);
+  background: #000000;
+  outline: none;
+}
+
+.viewer-stage:focus-visible {
+  outline: 3px solid var(--accent-strong);
+  outline-offset: 2px;
+}
+
+.viewer-canvas {
+  width: 100%;
+  height: clamp(340px, 62vh, 720px);
+}
+
+.viewer-canvas canvas {
+  display: block;
+}
+
+.viewer-labels {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  color: #7dd3fc;
+  font-weight: 700;
+  font-size: 0.9rem;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
+}
+
+.viewer-label {
+  position: absolute;
+}
+
+.viewer-label-top {
+  top: 6px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.viewer-label-bottom {
+  bottom: 6px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.viewer-label-left {
+  left: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.viewer-label-right {
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.viewer-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  padding: var(--space-4);
+  color: #e5e7eb;
+  text-align: center;
+  background: rgba(0, 0, 0, 0.35);
+}
+
+.viewer-overlay-error {
+  color: #fecaca;
+  background: rgba(0, 0, 0, 0.75);
+}
+
+.viewer-timing {
+  margin: var(--space-2) 0 0;
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
+/* --- marks and save state ---------------------------------------------- */
+
+.mark-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.mark-row {
+  display: flex;
+  align-items: stretch;
+  gap: var(--space-2);
+}
+
+.mark-focus {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+  padding: 0.5rem 0.7rem;
+  text-align: left;
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: inherit;
+}
+
+.mark-focus:hover {
+  background: var(--accent-soft);
+  border-color: var(--accent-border);
+}
+
+.mark-focus-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.2rem 0.6rem;
+}
+
+.mark-index {
+  font-weight: 700;
+  font-size: 0.88rem;
+}
+
+.mark-diameter {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--accent-strong);
+}
+
+.mark-origin {
+  color: var(--muted);
+  font-size: 0.74rem;
+}
+
+.mark-note {
+  color: var(--muted);
+  font-style: italic;
+  font-size: 0.8rem;
+  overflow-wrap: anywhere;
+}
+
+.mark-delete {
+  flex: 0 0 auto;
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+  padding: 0.2rem 0.55rem;
+  font-size: 0.8rem;
+}
+
+.mark-empty {
+  margin: var(--space-2) 0 0;
+  padding: var(--space-4) var(--space-3);
+}
+
+/* --- save / irreversible actions --------------------------------------- */
+
+.submit-bar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.save-status {
+  margin: 0;
+}
+
+.submit-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.confirm-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--warning-border);
+  border-left-width: 3px;
+  border-radius: var(--radius-sm);
+  background: var(--warning-soft);
+}
+
+.confirm-card p {
+  margin: 0;
+  font-size: 0.86rem;
+}
+
+.confirm-heading {
+  font-weight: 700;
+  color: var(--fg);
+}
+
+.confirm-destructive {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #ffffff;
+}
+
+.app-workspace .confirm-destructive {
+  color: #1b0a0a;
+}
+
+.confirm-destructive:hover:not(:disabled) {
+  background: var(--danger);
+  border-color: var(--danger);
+  filter: brightness(1.1);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.84rem;
+  font-weight: 600;
+}
+
+.field input {
+  width: 100%;
+}
+
+/* --- AI panel ----------------------------------------------------------- */
+
+.ai-panel {
+  break-inside: avoid;
+}
+
+.ai-provenance {
+  margin: var(--space-2) 0;
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
+.ai-provenance summary {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.4rem;
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.ai-provenance p {
+  margin: 0;
+}
+
+.candidate-list {
+  margin: var(--space-2) 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.candidate-row {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  background: var(--surface);
+}
+
+.candidate-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.3rem 0.7rem;
+  font-size: 0.82rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.candidate-index {
+  font-weight: 700;
+  color: var(--fg);
+  font-size: 0.88rem;
+}
+
+.candidate-score,
+.candidate-size {
+  white-space: nowrap;
+}
+
+.candidate-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.candidate-state {
+  margin: 0;
+}
+
+.candidate-actions button {
+  min-height: 2.5rem;
+  padding: 0.2rem 0.7rem;
+  font-size: 0.82rem;
+}
+
+/* --- responsive --------------------------------------------------------- */
+
+@media (max-width: 1120px) {
+  .case-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .case-sidebar {
+    position: static;
+    max-height: none;
+    overflow: visible;
+  }
+
+  .workflow-actions {
+    position: static;
+  }
+
+  .viewer-canvas {
+    height: clamp(320px, 58vh, 620px);
+  }
+}
+
+@media (max-width: 640px) {
+  .step-text small {
+    display: none;
+  }
+
+  .viewer-canvas {
+    height: clamp(280px, 46vh, 460px);
+  }
+
+  .tool-group {
+    flex: 1 1 100%;
+  }
+
+  .tool-group button {
+    flex: 1 1 auto;
+  }
+
+  .shortcut-help {
+    margin-left: 0;
+  }
+}

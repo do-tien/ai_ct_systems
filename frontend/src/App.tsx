@@ -319,8 +319,14 @@ export default function App() {
     window.location.assign(`/?case=${id}`)
   }, [])
 
+  // Only an authenticated case route gets the dark reading context.
+  const workspace = auth.status === 'authenticated' && caseId !== null
+
   return (
-    <div className="app">
+    <div className={workspace ? 'app app-workspace' : 'app'}>
+      <a className="skip-link" href="#main-content">
+        Bỏ qua đến nội dung chính
+      </a>
       <header className="app-header">
         <a className="brand" href="/" aria-label="Nodule Reader, về trang chủ">
           <span className="brand-mark" aria-hidden="true">
@@ -331,18 +337,19 @@ export default function App() {
             <small>Công cụ nghiên cứu CT lồng ngực</small>
           </span>
         </a>
-        {auth.status === 'authenticated' ? (
-          <UserBar
-            displayName={auth.session.user.displayName}
-            pending={logoutPending}
-            onLogout={submitLogout}
-          />
-        ) : (
+        <div className="app-header-actions">
           <span className="app-badge">Không dùng để chẩn đoán</span>
-        )}
+          {auth.status === 'authenticated' && (
+            <UserBar
+              displayName={auth.session.user.displayName}
+              pending={logoutPending}
+              onLogout={submitLogout}
+            />
+          )}
+        </div>
       </header>
 
-      <main className="page">
+      <main className="page" id="main-content" tabIndex={-1}>
         {auth.status === 'loading' && (
           <section className="panel auth-loading" aria-busy="true">
             <p role="status">Đang kiểm tra phiên làm việc…</p>

@@ -75,39 +75,20 @@ export default function Dashboard({ onOpenCase }: { onOpenCase: (caseId: number)
 
   return (
     <div className="dashboard">
-      <section className="panel hero" aria-labelledby="hero-heading">
-        <p className="eyebrow">Quy trình một ca</p>
-        <h2 id="hero-heading">Đọc độc lập trước, xem gợi ý sau, bác sĩ quyết định cuối cùng</h2>
-        <ol className="hero-steps">
-          <li>
-            <span className="hero-step-index">1</span>
-            <span>
-              <strong>Nhập ca</strong>
-              <small>Tải DICOM của một series CT, chọn series phù hợp và mở ca.</small>
-            </span>
-          </li>
-          <li>
-            <span className="hero-step-index">2</span>
-            <span>
-              <strong>Đọc độc lập</strong>
-              <small>Đo và lưu các dấu nốt khi chưa thấy bất kỳ thông tin AI nào, rồi nộp để khóa.</small>
-            </span>
-          </li>
-          <li>
-            <span className="hero-step-index">3</span>
-            <span>
-              <strong>Xem gợi ý &amp; chốt ca</strong>
-              <small>Chấp nhận hoặc bỏ qua từng ứng viên, rồi hoàn tất bản cuối.</small>
-            </span>
-          </li>
-        </ol>
-      </section>
+      <div className="page-intro">
+        <div>
+          <h1>Ca đọc của tôi</h1>
+          <p className="page-intro-text">
+            Mở ca đã có hoặc nhập ca mới. Bác sĩ đọc độc lập trước, xem gợi ý sau và giữ quyết định
+            cuối cùng.
+          </p>
+        </div>
+        <p className="panel-sub">{pending ? 'Đang tải danh sách…' : `${cases.length} ca trong danh sách`}</p>
+      </div>
 
       <div className="dashboard-grid">
-        <UploadPanel onOpenCase={onOpenCase} />
-
         <section className="panel case-list-panel" aria-labelledby="case-list-heading" aria-busy={pending}>
-          <div className="panel-heading">
+          <div className="case-toolbar">
             <div>
               <h2 id="case-list-heading">Ca của tôi</h2>
               <p className="panel-sub">
@@ -135,7 +116,7 @@ export default function Dashboard({ onOpenCase }: { onOpenCase: (caseId: number)
           {error === null && !pending && cases.length === 0 && (
             <div className="empty-state">
               <p>Chưa có ca nào.</p>
-              <p className="panel-sub">Tải dữ liệu DICOM của một ca ở khung bên trái để bắt đầu.</p>
+              <p className="panel-sub">Nhập dữ liệu DICOM của một ca ở khung bên cạnh để bắt đầu.</p>
             </div>
           )}
 
@@ -150,9 +131,23 @@ export default function Dashboard({ onOpenCase }: { onOpenCase: (caseId: number)
                         {formatCreatedAt(entry.createdAt)} · {entry.source}
                       </span>
                     </span>
-                    <span className={`chip chip-${STATUS_TONES[entry.status]}`}>{STATUS_LABELS[entry.status]}</span>
-                    <span className="case-card-open" aria-hidden="true">
-                      Mở
+                    <span className="case-card-status">
+                      <span className={`chip chip-${STATUS_TONES[entry.status]}`}>
+                        {STATUS_LABELS[entry.status]}
+                      </span>
+                    </span>
+                    <span className="case-card-open">
+                      Mở ca
+                      <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" focusable="false">
+                        <path
+                          d="M6 3.5 10.5 8 6 12.5"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.8"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
                     </span>
                   </a>
                 </li>
@@ -160,7 +155,36 @@ export default function Dashboard({ onOpenCase }: { onOpenCase: (caseId: number)
             </ul>
           )}
         </section>
+
+        <UploadPanel onOpenCase={onOpenCase} />
       </div>
+
+      <section className="panel onboarding" aria-labelledby="onboarding-heading">
+        <h2 id="onboarding-heading">Quy trình một ca</h2>
+        <ol className="onboarding-steps">
+          <li>
+            <span className="step-index">1</span>
+            <span>
+              <strong>Nhập ca</strong>
+              <small>Tải DICOM của một series CT, chọn series phù hợp và mở ca.</small>
+            </span>
+          </li>
+          <li>
+            <span className="step-index">2</span>
+            <span>
+              <strong>Đọc độc lập</strong>
+              <small>Đo và lưu các dấu nốt khi chưa thấy thông tin AI, rồi nộp để khóa.</small>
+            </span>
+          </li>
+          <li>
+            <span className="step-index">3</span>
+            <span>
+              <strong>Xem gợi ý &amp; chốt ca</strong>
+              <small>Chấp nhận hoặc bỏ qua từng ứng viên, rồi hoàn tất bản cuối.</small>
+            </span>
+          </li>
+        </ol>
+      </section>
     </div>
   )
 }

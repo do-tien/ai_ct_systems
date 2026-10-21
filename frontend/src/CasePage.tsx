@@ -87,7 +87,7 @@ export default function CasePage({ caseId }: { caseId: number }) {
   if (base === null) {
     return (
       <section className="panel" aria-labelledby="case-heading">
-        <h2 id="case-heading">Ca #{caseId}</h2>
+        <h1 id="case-heading">Ca #{caseId}</h1>
         <p>Đang tải thông tin ca và bản đọc đầu…</p>
         {error !== null && (
           <p className="error" role="alert">
@@ -105,7 +105,7 @@ export default function CasePage({ caseId }: { caseId: number }) {
   if (mode === 'conflict') {
     return (
       <section className="panel" aria-labelledby="case-heading">
-        <h2 id="case-heading">Ca #{caseId}</h2>
+        <h1 id="case-heading">Ca #{caseId}</h1>
         <p className="error" role="alert">
           {CONFLICT_MESSAGE}
         </p>
@@ -231,7 +231,7 @@ function InitialReadPane({
       <CaseHeader caseMetadata={caseMetadata} stage="independent" />
 
       <div className="case-grid">
-        <div className="case-viewer">
+        <section className="case-main" aria-label="Ảnh CT">
           <Viewer
             caseMetadata={caseMetadata}
             openedAt={openedAt}
@@ -248,7 +248,7 @@ function InitialReadPane({
               },
             }}
           />
-        </div>
+        </section>
 
         <aside className="case-sidebar" aria-label="Bản đọc đầu">
           <section className="panel read-panel" aria-labelledby="initial-read-heading">
@@ -273,27 +273,29 @@ function InitialReadPane({
               onRemove={(localId) => sessionRef.current?.remove(localId)}
             />
 
-            <SubmitBar
-              phase={state.phase}
-              error={state.error}
-              dirty={dirty}
-              busy={busy}
-              drawing={drawing}
-              canEdit={viewerEditable}
-              onSave={() => void workflowRef.current?.save()}
-              onSubmit={() => void workflowRef.current?.submit()}
-            />
+            <div className="workflow-actions">
+              <SubmitBar
+                phase={state.phase}
+                error={state.error}
+                dirty={dirty}
+                busy={busy}
+                drawing={drawing}
+                canEdit={viewerEditable}
+                onSave={() => void workflowRef.current?.save()}
+                onSubmit={() => void workflowRef.current?.submit()}
+              />
 
-            {(state.phase === 'error' || state.phase === 'conflict') && (
-              <button
-                type="button"
-                className="button-secondary"
-                onClick={() => void workflowRef.current?.reconcile()}
-                disabled={busy}
-              >
-                Đối chiếu với máy chủ
-              </button>
-            )}
+              {(state.phase === 'error' || state.phase === 'conflict') && (
+                <button
+                  type="button"
+                  className="button-secondary"
+                  onClick={() => void workflowRef.current?.reconcile()}
+                  disabled={busy}
+                >
+                  Đối chiếu với máy chủ
+                </button>
+              )}
+            </div>
           </section>
         </aside>
       </div>
@@ -462,7 +464,7 @@ function FinalReadPane({
   if (final === null || state === null) {
     return (
       <section className="panel" aria-labelledby="final-heading">
-        <h2 id="final-heading">Bản cuối sau khóa</h2>
+        <h1 id="final-heading">Bản cuối sau khóa</h1>
         <p>Đang tải bản đọc cuối…</p>
         {loadError !== null && (
           <p className="error" role="alert">
@@ -508,7 +510,7 @@ function FinalReadPane({
       <CaseHeader caseMetadata={caseMetadata} stage={completed ? 'completed' : 'review'} />
 
       <div className="case-grid">
-        <div className="case-viewer">
+        <section className="case-main" aria-label="Ảnh CT">
           <Viewer
             caseMetadata={caseMetadata}
             openedAt={openedAt}
@@ -528,7 +530,7 @@ function FinalReadPane({
               },
             }}
           />
-        </div>
+        </section>
 
         <aside className="case-sidebar" aria-label="Gợi ý AI và bản cuối">
           <AiPanel
@@ -567,27 +569,29 @@ function FinalReadPane({
               onRemove={(localId) => sessionRef.current?.remove(localId)}
             />
 
-            <FinalizeBar
-              phase={state.phase}
-              error={state.error}
-              dirty={dirty}
-              busy={busy}
-              drawing={drawing}
-              canEdit={viewerEditable}
-              onSave={() => void workflowRef.current?.save()}
-              onFinalize={() => void workflowRef.current?.finalize()}
-            />
+            <div className="workflow-actions">
+              <FinalizeBar
+                phase={state.phase}
+                error={state.error}
+                dirty={dirty}
+                busy={busy}
+                drawing={drawing}
+                canEdit={viewerEditable}
+                onSave={() => void workflowRef.current?.save()}
+                onFinalize={() => void workflowRef.current?.finalize()}
+              />
 
-            {(state.phase === 'error' || state.phase === 'conflict') && (
-              <button
-                type="button"
-                className="button-secondary"
-                onClick={() => void workflowRef.current?.reconcile()}
-                disabled={busy}
-              >
-                Đối chiếu với máy chủ
-              </button>
-            )}
+              {(state.phase === 'error' || state.phase === 'conflict') && (
+                <button
+                  type="button"
+                  className="button-secondary"
+                  onClick={() => void workflowRef.current?.reconcile()}
+                  disabled={busy}
+                >
+                  Đối chiếu với máy chủ
+                </button>
+              )}
+            </div>
           </section>
         </aside>
       </div>

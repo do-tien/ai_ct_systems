@@ -1,0 +1,8 @@
+/* Stylesheet entrypoint. Order matters: tokens define the variables every later
+   layer consumes; base sets primitives; shell, dashboard and workspace own one
+   surface each so a change to the workstation cannot regress the dashboard. */
+@import './tokens.css';
+@import './base.css';
+@import './shell.css';
+@import './dashboard.css';
+@import './workspace.css';

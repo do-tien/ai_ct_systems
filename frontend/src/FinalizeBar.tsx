@@ -1,5 +1,4 @@
-import { useState } from 'react'
-
+import ActionConfirm from './ui/ActionConfirm.tsx'
 import type { FinalWorkflowState } from './finalread/types.ts'
 
 // Save/finalize controls and the honest persistence status for the final read.
@@ -45,7 +44,6 @@ function statusText(
 }
 
 export default function FinalizeBar({ phase, error, dirty, busy, drawing, canEdit, onSave, onFinalize }: FinalizeBarProps) {
-  const [confirming, setConfirming] = useState(false)
   const status = statusText(phase, dirty, error)
   const completed = phase === 'completed'
   const controlsDisabled = !canEdit || busy || drawing
@@ -56,36 +54,19 @@ export default function FinalizeBar({ phase, error, dirty, busy, drawing, canEdi
         <span className={`chip chip-${status.tone}`}>{drawing ? 'Đang vẽ dấu…' : status.text}</span>
       </p>
 
-      {!completed && !confirming && (
+      {!completed && (
         <div className="submit-actions">
           <button type="button" className="button-secondary" onClick={onSave} disabled={controlsDisabled}>
             Lưu bản cuối
           </button>
-          <button type="button" className="button-primary" onClick={() => setConfirming(true)} disabled={controlsDisabled}>
-            Hoàn tất ca
-          </button>
-        </div>
-      )}
-
-      {!completed && confirming && (
-        <div className="confirm-card" role="alertdialog" aria-label="Xác nhận hoàn tất ca">
-          <p>Hoàn tất ca sẽ khóa bản cuối và không sửa được nữa; thao tác không chờ AI kết thúc. Tiếp tục?</p>
-          <div className="submit-actions">
-            <button
-              type="button"
-              className="button-primary"
-              onClick={() => {
-                setConfirming(false)
-                onFinalize()
-              }}
-              disabled={controlsDisabled}
-            >
-              Xác nhận hoàn tất
-            </button>
-            <button type="button" className="button-quiet" onClick={() => setConfirming(false)}>
-              Hủy
-            </button>
-          </div>
+          <ActionConfirm
+            triggerLabel="Hoàn tất ca"
+            heading="Hoàn tất và khóa bản cuối"
+            description="Bản cuối sẽ bị khóa và không sửa được nữa; thao tác này không chờ AI kết thúc. Tiếp tục?"
+            confirmLabel="Xác nhận hoàn tất"
+            disabled={controlsDisabled}
+            onConfirm={onFinalize}
+          />
         </div>
       )}
     </div>

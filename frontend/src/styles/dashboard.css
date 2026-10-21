@@ -1,0 +1,415 @@
+/* Light dashboard: the owned-case list is the primary working surface, the
+   upload panel is adjacent, and the three-step explanation sits below the
+   working grid. Nothing here is used inside the dark case workspace. */
+
+.dashboard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.page-intro {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-4);
+}
+
+.page-intro h1 {
+  margin-bottom: 0.15rem;
+}
+
+.page-intro-text {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.88rem;
+  max-width: 70ch;
+}
+
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(20rem, 0.85fr);
+  gap: var(--space-4);
+  align-items: start;
+}
+
+/* --- owned case list ---------------------------------------------------- */
+
+.case-list-panel {
+  min-height: 18rem;
+}
+
+.case-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.case-toolbar > div {
+  min-width: 0;
+}
+
+.case-toolbar h2 {
+  margin: 0;
+}
+
+.case-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.case-card {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 0.75rem;
+  min-height: 3.5rem;
+  padding: 0.65rem 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: inherit;
+  text-decoration: none;
+  transition: border-color 140ms ease, background-color 140ms ease;
+}
+
+.case-card:hover {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+}
+
+.case-card-main {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+  flex: 1 1 13rem;
+}
+
+.case-card-title {
+  font-weight: 700;
+  font-size: 0.95rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.case-card-meta {
+  color: var(--muted);
+  font-size: 0.8rem;
+  overflow-wrap: break-word;
+}
+
+.case-card-status {
+  flex: 0 0 auto;
+}
+
+.case-card-open {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin-left: auto;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--accent-strong);
+  white-space: nowrap;
+}
+
+.empty-state {
+  padding: var(--space-5) var(--space-3);
+  text-align: center;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface-muted);
+}
+
+.empty-state p {
+  margin: 0;
+}
+
+.skeleton-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.skeleton-row {
+  display: block;
+  height: 3.5rem;
+  border-radius: var(--radius-md);
+  background: linear-gradient(90deg, var(--surface-muted), var(--surface-strong), var(--surface-muted));
+  background-size: 200% 100%;
+  animation: skeleton 1.4s ease-in-out infinite;
+}
+
+@keyframes skeleton {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+/* A moving shimmer is decoration; keep the placeholder static here. */
+@media (prefers-reduced-motion: reduce) {
+  .skeleton-row {
+    background: var(--surface-strong);
+  }
+}
+
+/* --- onboarding strip --------------------------------------------------- */
+
+.onboarding {
+  background: var(--surface-muted);
+}
+
+.onboarding h2 {
+  margin-bottom: var(--space-2);
+}
+
+.onboarding-steps {
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+}
+
+.onboarding-steps li {
+  display: flex;
+  gap: 0.6rem;
+  align-items: flex-start;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.onboarding-steps strong {
+  display: block;
+  font-size: 0.9rem;
+}
+
+.onboarding-steps small {
+  display: block;
+  margin-top: 0.15rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.step-index {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 1.6rem;
+  height: 1.6rem;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+/* --- upload ------------------------------------------------------------- */
+
+.upload-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.upload-panel .panel-heading {
+  margin-bottom: 0;
+}
+
+.dropzone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.3rem;
+  padding: var(--space-5) var(--space-4);
+  border: 2px dashed var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface-muted);
+  text-align: center;
+  transition: border-color 140ms ease, background-color 140ms ease;
+}
+
+.dropzone-active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.dropzone-title {
+  margin: 0;
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+.dropzone-hint {
+  margin: 0 0 var(--space-2);
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.upload-picker {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--space-2);
+}
+
+.file-button {
+  cursor: pointer;
+}
+
+.file-button:focus-within {
+  outline: 2px solid var(--accent-strong);
+  outline-offset: 2px;
+}
+
+/* Compact replacement for the dropzone once files exist or an upload started. */
+.upload-selection {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-md);
+  background: var(--accent-soft);
+}
+
+.upload-selection-title {
+  margin: 0;
+  font-weight: 600;
+  font-size: 0.9rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.upload-summary {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
+.upload-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.upload-phase {
+  margin: 0;
+  font-weight: 600;
+  font-size: 0.86rem;
+}
+
+.upload-progress {
+  height: 0.5rem;
+  border-radius: 999px;
+  background: var(--surface-strong);
+  overflow: hidden;
+}
+
+.upload-progress-bar {
+  height: 100%;
+  background: var(--accent);
+  transition: width 140ms linear;
+}
+
+.upload-series-set {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+.upload-series {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.series-option {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  transition: border-color 140ms ease, background-color 140ms ease;
+}
+
+.series-option label {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  min-height: var(--control-height);
+  padding: 0.6rem 0.7rem;
+  font-size: 0.88rem;
+  cursor: pointer;
+}
+
+.series-option input {
+  flex: 0 0 auto;
+  width: 1.15rem;
+  height: 1.15rem;
+  margin-top: 0.1rem;
+  accent-color: var(--accent);
+}
+
+.series-option-selected {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.series-option-title {
+  display: block;
+}
+
+.series-option-disabled {
+  background: var(--surface-muted);
+}
+
+.series-option-disabled label {
+  cursor: not-allowed;
+  color: var(--muted);
+}
+
+.upload-reason {
+  display: block;
+  margin-top: 0.15rem;
+  font-size: 0.8rem;
+  color: var(--warning);
+}
+
+.format-note summary {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.4rem;
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.format-note p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+/* --- responsive --------------------------------------------------------- */
+
+@media (max-width: 900px) {
+  .dashboard-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
