@@ -9,12 +9,13 @@ export default defineConfig({
   plugins: [react()],
   server: {
     proxy: {
-      // Same-origin routing to the Go backend. Paths and queries are forwarded
-      // unchanged (no rewrite) and changeOrigin stays false so the backend
-      // sees the browser's public authority, not Vite's.
+      // Same-origin routing to the Go backend. API writes preserve the public
+      // authority for the backend's Origin check. The read-only DICOMweb gate
+      // accepts only a loopback authority, so that proxy uses the backend
+      // target authority while the browser still stays on this origin.
       '/healthz': { target: backendUrl, changeOrigin: false },
       '/api': { target: backendUrl, changeOrigin: false },
-      '/dicom-web': { target: backendUrl, changeOrigin: false },
+      '/dicom-web': { target: backendUrl, changeOrigin: true },
     },
   },
   worker: {
