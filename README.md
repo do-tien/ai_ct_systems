@@ -16,7 +16,7 @@
 
 <br/>
 
-> [!CAUTION]
+
 > **⚕️ Tuyên bố Y khoa (Medical Disclaimer):**  
 > Đây là sản phẩm **Đồ án cơ sở — Proof of Concept (PoC)** phục vụ mục đích nghiên cứu học thuật. Hệ thống **không phải thiết bị y tế**, **không dùng để chẩn đoán lâm sàng** và **không thay thế quyết định chuyên môn của bác sĩ**. Mọi gợi ý từ AI chỉ mang tính chất tham khảo.
 
