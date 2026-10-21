@@ -117,6 +117,9 @@ def _build_parser(bundle_dir: Path, device: str, score_threshold: float, *, resa
     parser.read_config(str(config))
     parser["bundle_root"] = str(bundle_dir)
     parser["device"] = torch.device(device)
+    # The bundle's fp16 autocast path yields NaN box extents on this detector
+    # (pred_whd_axis is NaN or Inf); fp32 fits comfortably in GPU memory.
+    parser["amp"] = False
     if resample:
         # Enable the existing Spacingd instead of flipping the reader branch.
         parser[RESAMPLING_OVERRIDE_KEY] = False
@@ -248,14 +251,17 @@ def predict_nifti(parser, network, nifti_path: Path) -> dict:
     image = data["image"]
 
     network.eval()
+    # Mirror the bundle evaluator's prepare_batch: the network lives on
+    # `device`, so the input must too (postprocessing keeps the CPU copy).
+    model_input = image.to(device=device)
     try:
         with torch.inference_mode():
             if device.startswith("cuda") and amp:
                 with torch.autocast("cuda"):
-                    predictions = inferer([image], network)
+                    predictions = inferer([model_input], network)
             else:
                 # CPU (and any non-AMP path) never enables CUDA autocast.
-                predictions = inferer([image], network)
+                predictions = inferer([model_input], network)
     except torch.cuda.OutOfMemoryError as exc:
         raise BundleError("inference ran out of memory", code="MODEL_OOM") from exc
     except MemoryError as exc:
