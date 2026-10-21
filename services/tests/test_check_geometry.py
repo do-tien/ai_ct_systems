@@ -10,15 +10,15 @@ from pathlib import Path
 
 import numpy as np
 
-from nodule_ai.check_geometry import main
-from nodule_ai.dicom_geometry import voxel_to_lps_affine, voxel_to_world
+from module_ai.check_geometry import main
+from module_ai.dicom_geometry import voxel_to_lps_affine, voxel_to_world
 
 HAS_SITK = importlib.util.find_spec("SimpleITK") is not None
 HAS_PYDICOM = importlib.util.find_spec("pydicom") is not None
 HAS_MONAI = importlib.util.find_spec("monai") is not None
 
 if HAS_SITK:
-    from nodule_ai.volume import read_ct_volume
+    from module_ai.volume import read_ct_volume
 
 try:  # the fixture writer is shared with test_volume
     from test_volume import make_series
@@ -198,8 +198,8 @@ class GeometryCliTests(unittest.TestCase):
 @unittest.skipUnless(HAS_MONAI, "requires the AI environment (monai)")
 class BundleProbeGuardTests(unittest.TestCase):
     def test_missing_bundle_config_is_rejected(self):
-        from nodule_ai.check_geometry import run_bundle_transform
-        from nodule_ai.errors import GeometryError
+        from module_ai.check_geometry import run_bundle_transform
+        from module_ai.errors import GeometryError
 
         with tempfile.TemporaryDirectory() as tmp:
             with self.assertRaises(GeometryError) as raised:

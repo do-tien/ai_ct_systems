@@ -13,7 +13,7 @@ from pathlib import Path
 import numpy as np
 import pydicom
 
-from nodule_ai.infer import PeakRssSampler
+from module_ai.infer import PeakRssSampler
 
 HAS_SITK = importlib.util.find_spec("SimpleITK") is not None
 HAS_PYDICOM = importlib.util.find_spec("pydicom") is not None
@@ -49,7 +49,7 @@ def _success_document() -> dict:
 class InferCliTests(unittest.TestCase):
     def _run(self, args: list[str]) -> subprocess.CompletedProcess:
         return subprocess.run(
-            [sys.executable, "-m", "nodule_ai.infer", *args],
+            [sys.executable, "-m", "module_ai.infer", *args],
             capture_output=True,
             text=True,
             cwd=str(Path(__file__).resolve().parents[1]),
@@ -276,7 +276,7 @@ class DependencyFailureTests(unittest.TestCase):
             make_series(directory, [(float(k), plane + k, k + 1, f"s{k}.dcm") for k in range(3)])
             out = root / "result.json"
             completed = subprocess.run(
-                [sys.executable, "-m", "nodule_ai.infer", "--series-dir", str(directory), "--out", str(out),
+                [sys.executable, "-m", "module_ai.infer", "--series-dir", str(directory), "--out", str(out),
                  "--bundle-dir", str(root / "no-bundle"), "--device", "cuda"],
                 capture_output=True, text=True, cwd=str(Path(__file__).resolve().parents[1]),
             )
@@ -286,7 +286,7 @@ class DependencyFailureTests(unittest.TestCase):
 
 class ErrorMappingTests(unittest.TestCase):
     def test_malformed_prediction_maps_to_invalid_model_output(self):
-        from nodule_ai.infer import _map_error
+        from module_ai.infer import _map_error
 
         self.assertEqual(_map_error(ValueError("boxes must be positive")), ("INVALID_MODEL_OUTPUT", 3))
 

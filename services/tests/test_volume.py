@@ -15,14 +15,14 @@ if HAS_PYDICOM:
     from pydicom.dataset import Dataset, FileMetaDataset
     from pydicom.uid import CTImageStorage, ExplicitVRLittleEndian
 
-from nodule_ai.dicom_geometry import lps_to_ras_affine
-from nodule_ai.errors import GeometryError
+from module_ai.dicom_geometry import lps_to_ras_affine
+from module_ai.errors import GeometryError
 
 HAS_SITK = importlib.util.find_spec("SimpleITK") is not None
 if HAS_SITK:
     import SimpleITK as sitk
 
-    from nodule_ai.volume import read_ct_volume, validate_decoded_pixels, write_nifti
+    from module_ai.volume import read_ct_volume, validate_decoded_pixels, write_nifti
 
 STUDY_UID = "1.3.6.1.4.1.14519.5.2.1.6279.6001.100000000000000000000000000001"
 SERIES_UID = "1.3.6.1.4.1.14519.5.2.1.6279.6001.200000000000000000000000000001"

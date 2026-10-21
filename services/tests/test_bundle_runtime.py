@@ -14,7 +14,7 @@ from pathlib import Path
 
 import numpy as np
 
-from nodule_ai.bundle_runtime import (
+from module_ai.bundle_runtime import (
     AFFINE_LPS_TO_RAS,
     RESAMPLING_OVERRIDE_KEY,
     BundleError,
@@ -83,7 +83,7 @@ class BundleGuardTests(unittest.TestCase):
     def test_postprocessed_box_guard_rejects_impossible_geometry(self):
         import torch
 
-        from nodule_ai.bundle_runtime import _validate_postprocessed_box
+        from module_ai.bundle_runtime import _validate_postprocessed_box
 
         good = torch.tensor([[0.0, 0.0, 0.0, 2.0, 2.0, 2.0]])
         _validate_postprocessed_box(good, 1)
@@ -144,7 +144,7 @@ class StrictLoaderTests(unittest.TestCase):
         import torch
         from monai.handlers.checkpoint_loader import CheckpointLoader
 
-        from nodule_ai.bundle_runtime import engine_stub
+        from module_ai.bundle_runtime import engine_stub
 
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -163,7 +163,7 @@ class StrictLoaderTests(unittest.TestCase):
             loader(engine_stub())  # strict load of matching weights succeeds
 
     def test_engine_stub_satisfies_the_documented_handler_contract(self):
-        from nodule_ai.bundle_runtime import engine_stub
+        from module_ai.bundle_runtime import engine_stub
 
         stub = engine_stub()
         self.assertIsNone(stub.state.max_epochs)
@@ -243,7 +243,7 @@ class ResampledGeometryProbeTests(unittest.TestCase):
     def _nifti(self, root: Path) -> np.ndarray:
         import nibabel as nib
 
-        from nodule_ai.dicom_geometry import lps_to_ras_affine
+        from module_ai.dicom_geometry import lps_to_ras_affine
 
         # Oblique, anisotropic, non-zero origin, asymmetric volume.
         direction = np.array([[0.6, 0.8, 0.0], [-0.8, 0.6, 0.0], [0.0, 0.0, 1.0]])
@@ -261,7 +261,7 @@ class ResampledGeometryProbeTests(unittest.TestCase):
     def _nifti_axis_aligned(self, root: Path) -> None:
         import nibabel as nib
 
-        from nodule_ai.dicom_geometry import lps_to_ras_affine
+        from module_ai.dicom_geometry import lps_to_ras_affine
 
         lps_affine = np.eye(4)
         lps_affine[:3, :3] = np.diag([0.7, 1.3, 1.2])

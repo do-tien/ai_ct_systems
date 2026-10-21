@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import unittest
 
-from nodule_ai.inference_result import (
+from module_ai.inference_result import (
     candidates_from_boxes,
     error_result,
     validate_success,
@@ -173,7 +173,7 @@ class PublicationTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp) / "result.json"
-            with mock.patch("nodule_ai.inference_result.os.replace", side_effect=OSError("boom")):
+            with mock.patch("module_ai.inference_result.os.replace", side_effect=OSError("boom")):
                 with self.assertRaises(OSError):
                     write_result(success_document(), out)
             self.assertFalse(out.exists())
@@ -188,7 +188,7 @@ class PublicationTests(unittest.TestCase):
             out = Path(tmp) / "result.json"
             sentinel = Path(tmp) / "keep.txt"
             sentinel.write_text("keep", encoding="utf-8")
-            with mock.patch("nodule_ai.inference_result.os.replace", side_effect=OSError("boom")):
+            with mock.patch("module_ai.inference_result.os.replace", side_effect=OSError("boom")):
                 with self.assertRaises(OSError):
                     write_result(success_document(), out)
             self.assertEqual(sentinel.read_text(encoding="utf-8"), "keep")

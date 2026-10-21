@@ -12,8 +12,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from nodule_ai import check_environment
-from nodule_ai.check_environment import (
+from module_ai import check_environment
+from module_ai.check_environment import (
     CheckError,
     check_environment as run_check,
     main,

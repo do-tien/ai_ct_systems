@@ -16,12 +16,12 @@ from pathlib import Path
 
 import numpy as np
 
-from nodule_ai.dicom_geometry import (
+from module_ai.dicom_geometry import (
     DataError,
     mean_contour_center_lps,
     pixel_to_lps,
 )
-from nodule_ai.reference_nodules import (
+from module_ai.reference_nodules import (
     build_reference,
     export_reference,
     match_reading_sessions,
@@ -504,7 +504,7 @@ class ReferenceTests(unittest.TestCase):
 @unittest.skipUnless(HAS_PYDICOM, "requires the data/geometry environment (pydicom)")
 class CliStaleOutputTests(unittest.TestCase):
     def test_reference_cli_removes_stale_output_before_failing(self):
-        from nodule_ai import reference_nodules
+        from module_ai import reference_nodules
 
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -535,7 +535,7 @@ class CliStaleOutputTests(unittest.TestCase):
             self.assertFalse(out.exists())
 
     def test_reference_cli_reports_invalid_selection_as_data_error(self):
-        from nodule_ai import reference_nodules
+        from module_ai import reference_nodules
 
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

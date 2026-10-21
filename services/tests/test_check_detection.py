@@ -15,7 +15,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from nodule_ai.check_detection import compare_detection
+from module_ai.check_detection import compare_detection
 
 SERIES_UID = "1.3.6.1.4.1.14519.5.2.1.6279.6001.200000000000000000000000000001"
 FRAME_UID = "1.3.6.1.4.1.14519.5.2.1.6279.6001.300000000000000000000000000001"
@@ -203,7 +203,7 @@ class CliTests(unittest.TestCase):
 
     def _run(self, *args) -> subprocess.CompletedProcess:
         return subprocess.run(
-            [sys.executable, "-m", "nodule_ai.check_detection", *map(str, args)],
+            [sys.executable, "-m", "module_ai.check_detection", *map(str, args)],
             capture_output=True,
             text=True,
             cwd=str(Path(__file__).resolve().parents[1]),

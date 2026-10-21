@@ -19,8 +19,8 @@ if HAS_PYDICOM:
     from pydicom.dataset import Dataset, FileMetaDataset
     from pydicom.uid import CTImageStorage, ExplicitVRLittleEndian
 
-from nodule_ai.dicom_geometry import DataError, GeometryError, read_series_metadata
-from nodule_ai.fetch_case import fetch_case
+from module_ai.dicom_geometry import DataError, GeometryError, read_series_metadata
+from module_ai.fetch_case import fetch_case
 
 STUDY_UID = "1.3.6.1.4.1.14519.5.2.1.6279.6001.100000000000000000000000000001"
 SERIES_A = "1.3.6.1.4.1.14519.5.2.1.6279.6001.200000000000000000000000000001"
@@ -257,7 +257,7 @@ class FetchCaseTests(unittest.TestCase):
                 fetch_case(selection, out, client=FakeIDCClient(self._builder))
 
     def test_failed_fetch_removes_stale_manifest(self):
-        from nodule_ai.fetch_case import MANIFEST_NAME, main
+        from module_ai.fetch_case import MANIFEST_NAME, main
 
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp)

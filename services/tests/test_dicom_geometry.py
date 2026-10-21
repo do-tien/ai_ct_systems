@@ -6,7 +6,7 @@ import unittest
 
 import numpy as np
 
-from nodule_ai.dicom_geometry import (
+from module_ai.dicom_geometry import (
     GeometryError,
     lps_to_ras,
     lps_to_ras_affine,
