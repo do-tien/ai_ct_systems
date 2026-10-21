@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"nodule-reader/backend/internal/application/aijob"
+	"nodule-reader/backend/internal/application/caseimport"
 	"nodule-reader/backend/internal/application/finalread"
 	"nodule-reader/backend/internal/application/health"
 	"nodule-reader/backend/internal/application/initialread"
@@ -62,6 +63,13 @@ func main() {
 	initialReadService := initialread.NewService(postgres.NewInitialReadStore(pool))
 	finalReadService := finalread.NewService(postgres.NewFinalReadStore(pool))
 
+	// Uploads use their own bounded Orthanc client: the two-second health probe
+	// and the long-lived image transport must not share a connection budget.
+	uploadService := caseimport.NewService(
+		orthanc.NewClient(orthanc.NewImportHTTPClient(), cfg.OrthancURL, cfg.OrthancUser, cfg.OrthancPassword),
+		postgres.NewImportStore(pool),
+	)
+
 	imageTransport := newImageTransport()
 	defer imageTransport.CloseIdleConnections()
 
@@ -74,15 +82,21 @@ func main() {
 	}
 
 	server := &http.Server{
-		Addr:              cfg.HTTPAddr,
-		Handler:           httpapi.NewRouter(healthService, initialReadService, finalReadService, httpapi.NewDICOMwebHandler(dicomwebProxy)),
+		Addr: cfg.HTTPAddr,
+		Handler: httpapi.NewRouter(
+			healthService,
+			initialReadService,
+			finalReadService,
+			httpapi.NewUploadHandler(uploadService, cfg.UploadDir),
+			httpapi.NewDICOMwebHandler(dicomwebProxy),
+		),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
 	// The AI job worker starts outside the HTTP handlers and owns its own
-	// lifetime: a bounded startup snapshot of queued jobs is drained one at a
-	// time, so listening never waits on a database snapshot, an archive
-	// download or Python startup.
+	// lifetime: it scans the queue immediately, drains a bounded batch one job at
+	// a time and keeps scanning until shutdown, so a job committed by a later
+	// upload is picked up without restarting the server.
 	archiveClient := orthanc.NewArchiveClient(orthanc.NewArchiveHTTPClient(), cfg.OrthancURL, cfg.OrthancUser, cfg.OrthancPassword)
 	runner := python.NewRunner(python.Settings{
 		Python:    cfg.AIPython,

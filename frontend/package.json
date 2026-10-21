@@ -8,7 +8,8 @@
     "typecheck": "tsc --noEmit",
     "build": "npm run typecheck && vite build",
     "test:geometry": "node --experimental-strip-types --test \"tests/*.test.ts\"",
-    "test:initialread": "node --experimental-strip-types --test \"tests/initialread-*.test.ts\""
+    "test:initialread": "node --experimental-strip-types --test \"tests/initialread-*.test.ts\"",
+    "test:upload": "node --experimental-strip-types --test \"tests/upload-*.test.ts\""
   },
   "dependencies": {
     "@cornerstonejs/core": "4.22.13",

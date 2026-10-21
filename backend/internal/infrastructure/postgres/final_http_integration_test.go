@@ -30,7 +30,7 @@ func httpHarness(t *testing.T) (*storageHarness, *pgxpool.Pool, func(method, tar
 	pool := importRuntimePool(t, h)
 	initialService := initialread.NewService(postgres.NewInitialReadStore(pool))
 	finalService := finalread.NewService(postgres.NewFinalReadStore(pool))
-	handler := httpapi.NewRouter(nil, initialService, finalService, http.NotFoundHandler())
+	handler := httpapi.NewRouter(nil, initialService, finalService, nil, http.NotFoundHandler())
 	do := func(method, target, contentType, body string) *httptest.ResponseRecorder {
 		request := httptest.NewRequest(method, target, strings.NewReader(body))
 		if contentType != "" {

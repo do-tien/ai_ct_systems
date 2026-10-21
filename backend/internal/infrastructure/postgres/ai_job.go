@@ -28,8 +28,8 @@ func NewAIJobStore(pool *pgxpool.Pool) *AIJobStore {
 	return &AIJobStore{pool: pool}
 }
 
-// ListQueued returns the IDs of every queued job in ascending order. This is
-// the bounded startup snapshot; it never marks anything running.
+// ListQueued returns the IDs of every queued job in ascending order. The worker
+// takes at most one batch from it per scan; it never marks anything running.
 func (s *AIJobStore) ListQueued(ctx context.Context) ([]int64, error) {
 	ids, err := lc1db.New(s.pool).ListQueuedAIJobs(ctx)
 	if err != nil {

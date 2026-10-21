@@ -15,9 +15,11 @@ import (
 // fakeStore models the ai_jobs table and its conditional transitions so tests
 // assert observable state, not calls echoed back by a mock.
 type fakeStore struct {
-	queued     []int64
-	jobs       map[int64]*fakeJobState
-	listErr    error
+	queued  []int64
+	jobs    map[int64]*fakeJobState
+	listErr error
+	// listFails makes the next N ListQueued calls fail before listErr applies.
+	listFails  int
 	claimErr   error
 	succeedErr error
 	failErr    error
@@ -50,6 +52,10 @@ func (s *fakeStore) addJob(job Job, status string, inSnapshot bool) {
 
 func (s *fakeStore) ListQueued(context.Context) ([]int64, error) {
 	s.listCalls++
+	if s.listFails > 0 {
+		s.listFails--
+		return nil, errors.New("scripted transient list failure")
+	}
 	if s.listErr != nil {
 		return nil, s.listErr
 	}
@@ -145,7 +151,7 @@ func testServiceJob(id int64) Job {
 
 func runService(store Store, runner Runner) error {
 	service := NewService(store, noArchive{}, runner, 15*time.Minute)
-	return service.Run(context.Background())
+	return service.Drain(context.Background())
 }
 
 func TestServiceProcessesSnapshotJob(t *testing.T) {

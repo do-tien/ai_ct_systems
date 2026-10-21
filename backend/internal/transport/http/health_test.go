@@ -32,6 +32,7 @@ func doHealthRequest(postgresErr, orthancErr error) (int, http.Header, string) {
 		health.NewService(stubProbe{err: postgresErr}, stubProbe{err: orthancErr}),
 		nil,                    // unused initial-read dependency for health tests
 		nil,                    // unused final-read dependency for health tests
+		nil,                    // unused upload dependency for health tests
 		http.NotFoundHandler(), // unused DICOMweb dependency for health tests
 	)
 	recorder := httptest.NewRecorder()

@@ -12,11 +12,11 @@ import (
 )
 
 // NewRouter builds the HTTP handler around the health use case, the
-// independent-read API, the post-lock AI/final API and the read-only DICOMweb
-// proxy gate. Every dependency is required: the composition root always injects
-// the real gate wrapping the Orthanc proxy, never a disabled or placeholder
-// route.
-func NewRouter(healthService *health.Service, initialReadService *initialread.Service, finalReadService *finalread.Service, dicomwebHandler http.Handler) http.Handler {
+// independent-read API, the post-lock AI/final API, the DICOM upload endpoints
+// and the read-only DICOMweb proxy gate. Every dependency is required: the
+// composition root always injects the real upload handler and the real gate
+// wrapping the Orthanc proxy, never a disabled or placeholder route.
+func NewRouter(healthService *health.Service, initialReadService *initialread.Service, finalReadService *finalread.Service, uploadHandler http.Handler, dicomwebHandler http.Handler) http.Handler {
 	router := chi.NewRouter()
 	router.Method(http.MethodGet, "/healthz", &healthHandler{health: healthService})
 
@@ -31,6 +31,12 @@ func NewRouter(healthService *health.Service, initialReadService *initialread.Se
 	router.Get("/api/cases/{id}/reads/final", finalRead.getFinal)
 	router.Put("/api/cases/{id}/reads/final", finalRead.putFinal)
 	router.Post("/api/cases/{id}/finalize", finalRead.finalize)
+	// Register the upload namespace with and without a trailing wildcard so both
+	// "/api/uploads" and "/api/uploads/..." reach the upload handler, which
+	// inspects the unnormalized request path itself. The handler only accepts
+	// the documented method/path pairs.
+	router.Handle("/api/uploads", uploadHandler)
+	router.Handle("/api/uploads/*", uploadHandler)
 	// Register the namespace with and without a trailing wildcard so both
 	// "/dicom-web" and "/dicom-web/..." reach the gate. The gate inspects the
 	// unnormalized request path itself, so no path-cleaning middleware may be

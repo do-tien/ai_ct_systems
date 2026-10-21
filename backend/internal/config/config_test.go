@@ -118,6 +118,7 @@ func setAI(t *testing.T, overrides map[string]string) {
 		"AI_JOB_DIR":    filepath.Join(root, "jobs"),
 		"AI_TIMEOUT":    "",
 		"AI_DEVICE":     "",
+		"UPLOAD_DIR":    filepath.Join(root, "uploads"),
 	}
 	for name, value := range overrides {
 		values[name] = value
@@ -236,6 +237,54 @@ func TestLoadAIRejectsJobDirOverlap(t *testing.T) {
 			setAI(t, map[string]string{"AI_BUNDLE_DIR": bundle, "AI_JOB_DIR": jobDir})
 			if _, err := loadServerConfig(t); err == nil {
 				t.Fatalf("Load() accepted overlapping job dir %q", jobDir)
+			}
+		})
+	}
+}
+
+func TestLoadCreatesUploadDir(t *testing.T) {
+	uploadDir := filepath.Join(t.TempDir(), "nested", "uploads")
+	setAI(t, map[string]string{"UPLOAD_DIR": uploadDir})
+	cfg, err := loadServerConfig(t)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.UploadDir != uploadDir {
+		t.Fatalf("UploadDir = %q", cfg.UploadDir)
+	}
+	info, err := os.Stat(uploadDir)
+	if err != nil || !info.IsDir() {
+		t.Fatalf("upload dir was not created: %v", err)
+	}
+}
+
+func TestLoadRejectsInvalidUploadDir(t *testing.T) {
+	root := t.TempDir()
+	bundle := filepath.Join(root, "bundle")
+	jobDir := filepath.Join(root, "jobs")
+	if err := os.MkdirAll(bundle, 0o700); err != nil {
+		t.Fatalf("create bundle: %v", err)
+	}
+	regularFile := filepath.Join(root, "file")
+	if err := os.WriteFile(regularFile, []byte("x"), 0o600); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	for name, uploadDir := range map[string]string{
+		"relative":    "uploads",
+		"is a file":   regularFile,
+		"empty":       "",
+		"in bundle":   filepath.Join(bundle, "uploads"),
+		"in job dir":  filepath.Join(jobDir, "uploads"),
+		"contains AI": root,
+	} {
+		t.Run(name, func(t *testing.T) {
+			setAI(t, map[string]string{
+				"AI_BUNDLE_DIR": bundle,
+				"AI_JOB_DIR":    jobDir,
+				"UPLOAD_DIR":    uploadDir,
+			})
+			if _, err := loadServerConfig(t); err == nil {
+				t.Fatalf("Load() accepted upload dir %q", uploadDir)
 			}
 		})
 	}

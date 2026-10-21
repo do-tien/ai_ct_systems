@@ -13,6 +13,12 @@ import (
 // prevent recording its outcome.
 const persistenceTimeout = 5 * time.Second
 
+// batchSize bounds how many queued jobs one scan handles.
+const batchSize = 32
+
+// defaultScanInterval is how long the worker waits before scanning again.
+const defaultScanInterval = 2 * time.Second
+
 // logLifecycle records one fixed lifecycle line per job. It carries the job ID,
 // a fixed operational category and the outcome only: never a stderr tail, a
 // result body, a path, a credential, a real UID, a patient tag or upstream
@@ -21,7 +27,8 @@ var logLifecycle = log.Printf
 
 // Store is the consumer-owned persistence port for the AI job lifecycle.
 type Store interface {
-	// ListQueued returns the bounded startup snapshot of queued job IDs.
+	// ListQueued returns the queued job IDs in ascending order. The worker
+	// bounds each batch; it never marks anything running.
 	ListQueued(ctx context.Context) ([]int64, error)
 	// Claim conditionally transitions one queued job to running and returns its
 	// immutable case linkage.
@@ -37,29 +44,71 @@ type Runner interface {
 	Run(ctx context.Context, job Job, archive Archive) (Execution, error)
 }
 
-// Service is the LC1-12 use case: a bounded startup drain that serially claims
-// queued jobs, runs the inference CLI and persists only a validated result or a
+// Service is the LC1-12 use case: a lifetime worker that serially claims queued
+// jobs, runs the inference CLI and persists only a validated result or a
 // sanitized failure. It never writes reads, marks or case state.
 type Service struct {
-	store   Store
-	archive Archive
-	runner  Runner
-	timeout time.Duration
+	store    Store
+	archive  Archive
+	runner   Runner
+	timeout  time.Duration
+	interval time.Duration
+	wait     func(context.Context, time.Duration)
 }
 
 // NewService builds the use case from its ports and the per-job budget.
 func NewService(store Store, archive Archive, runner Runner, timeout time.Duration) *Service {
-	return &Service{store: store, archive: archive, runner: runner, timeout: timeout}
+	return &Service{
+		store:    store,
+		archive:  archive,
+		runner:   runner,
+		timeout:  timeout,
+		interval: defaultScanInterval,
+		wait:     waitForInterval,
+	}
 }
 
-// Run drains one bounded snapshot of queued jobs, one at a time, and returns
-// nil when the snapshot is consumed or the caller's context is canceled. A
-// store operation that makes further progress unsafe stops the drain and is
-// returned; the caller logs it and the HTTP server keeps serving.
+// waitForInterval blocks until the interval elapses or the context is canceled.
+func waitForInterval(ctx context.Context, duration time.Duration) {
+	timer := time.NewTimer(duration)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+	case <-timer.C:
+	}
+}
+
+// Run owns the worker lifetime: it drains one bounded batch immediately and
+// keeps draining newly queued jobs until the caller cancels the context. A
+// store failure aborts the current batch, is logged as a fixed category and is
+// retried on the next cycle; Run never returns while the queue is merely empty.
+// Only queued jobs are ever considered.
 func (s *Service) Run(ctx context.Context) error {
+	for {
+		if ctx.Err() != nil {
+			return nil
+		}
+		if err := s.Drain(ctx); err != nil {
+			logLifecycle("ai worker: batch aborted")
+		}
+		if ctx.Err() != nil {
+			return nil
+		}
+		s.wait(ctx, s.interval)
+	}
+}
+
+// Drain processes one bounded batch of queued jobs, one at a time, and returns
+// nil when the batch is consumed or the caller's context is canceled. A store
+// operation that makes further progress unsafe stops the batch and is returned;
+// Run logs it and retries on the next cycle.
+func (s *Service) Drain(ctx context.Context) error {
 	ids, err := s.store.ListQueued(ctx)
 	if err != nil {
 		return fmt.Errorf("cannot list queued jobs: %w", err)
+	}
+	if len(ids) > batchSize {
+		ids = ids[:batchSize]
 	}
 	for _, id := range ids {
 		if ctx.Err() != nil {

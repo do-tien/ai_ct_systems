@@ -34,6 +34,7 @@ type Config struct {
 	AIJobDir         string
 	AITimeout        time.Duration
 	AIDevice         string
+	UploadDir        string
 }
 
 // LoadPostgres reads only the POSTGRES_* variables needed to reach the
@@ -158,6 +159,13 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 
+	if cfg.UploadDir, err = required("UPLOAD_DIR"); err != nil {
+		return Config{}, err
+	}
+	if err := prepareUploadDir(cfg.UploadDir, cfg.AIBundleDir, cfg.AIJobDir); err != nil {
+		return Config{}, err
+	}
+
 	return cfg, nil
 }
 
@@ -215,6 +223,39 @@ func prepareJobDir(jobDir, bundleDir string) error {
 	}
 	if err := os.Remove(name); err != nil {
 		return fmt.Errorf("AI_JOB_DIR must be writable")
+	}
+	return nil
+}
+
+// prepareUploadDir creates the private upload root when absent, confirms it is
+// a writable directory and rejects any overlap with the AI bundle or job roots
+// so staged DICOM can never land inside a read-only or inference directory.
+func prepareUploadDir(uploadDir string, forbidden ...string) error {
+	if !filepath.IsAbs(uploadDir) {
+		return fmt.Errorf("UPLOAD_DIR must be an absolute path")
+	}
+	if err := os.MkdirAll(uploadDir, 0o700); err != nil {
+		return fmt.Errorf("UPLOAD_DIR must be a creatable directory")
+	}
+	info, err := os.Stat(uploadDir)
+	if err != nil || !info.IsDir() {
+		return fmt.Errorf("UPLOAD_DIR must be a directory")
+	}
+	for _, other := range forbidden {
+		if other != "" && pathsOverlap(uploadDir, other) {
+			return fmt.Errorf("UPLOAD_DIR must not overlap the AI bundle or job directory")
+		}
+	}
+	probe, err := os.CreateTemp(uploadDir, ".upload-probe-")
+	if err != nil {
+		return fmt.Errorf("UPLOAD_DIR must be writable")
+	}
+	name := probe.Name()
+	if err := probe.Close(); err != nil {
+		return fmt.Errorf("UPLOAD_DIR must be writable")
+	}
+	if err := os.Remove(name); err != nil {
+		return fmt.Errorf("UPLOAD_DIR must be writable")
 	}
 	return nil
 }

@@ -97,7 +97,7 @@ const measuredMarkJSON = `{"p1_mm":[-102.3,45.1,-180.5],"p2_mm":[-90.2,33.0,-180
 	`"ai_candidate_id":null,"view_plane_normal":[0,0,1],"note":"17 mm solid"}`
 
 func doInitialRequest(store initialread.Store, method, target, contentType string, body io.Reader) *httptest.ResponseRecorder {
-	handler := NewRouter(nil, initialread.NewService(store), nil, http.NotFoundHandler())
+	handler := NewRouter(nil, initialread.NewService(store), nil, nil, http.NotFoundHandler())
 	request := httptest.NewRequest(method, target, body)
 	if contentType != "" {
 		request.Header.Set("Content-Type", contentType)

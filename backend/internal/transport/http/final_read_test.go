@@ -52,7 +52,7 @@ func (s *stubFinalStore) Finalize(context.Context, int64, string) (finalread.Fin
 }
 
 func doFinalRequest(store finalread.Store, method, target, contentType string, body io.Reader) *httptest.ResponseRecorder {
-	handler := NewRouter(nil, nil, finalread.NewService(store), http.NotFoundHandler())
+	handler := NewRouter(nil, nil, finalread.NewService(store), nil, http.NotFoundHandler())
 	request := httptest.NewRequest(method, target, body)
 	if contentType != "" {
 		request.Header.Set("Content-Type", contentType)
@@ -374,7 +374,7 @@ func TestFinalReadHTTPFinalize(t *testing.T) {
 			store := &stubFinalStore{}
 			request := httptest.NewRequest(http.MethodPost, "/api/cases/1/finalize", body)
 			recorder := httptest.NewRecorder()
-			handler := NewRouter(nil, nil, finalread.NewService(store), http.NotFoundHandler())
+			handler := NewRouter(nil, nil, finalread.NewService(store), nil, http.NotFoundHandler())
 			handler.ServeHTTP(recorder, request)
 			if recorder.Code != http.StatusBadRequest {
 				t.Fatalf("%s status = %d, want 400", name, recorder.Code)
