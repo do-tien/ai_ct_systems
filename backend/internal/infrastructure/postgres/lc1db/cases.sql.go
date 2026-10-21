@@ -142,6 +142,65 @@ func (q *Queries) GetCaseForUpdate(ctx context.Context, id int64) (Case, error) 
 	return i, err
 }
 
+const listCasesByReader = `-- name: ListCasesByReader :many
+SELECT c.id, c.source, c.study_instance_uid, c.series_instance_uid, c.orthanc_series_id, c.frame_of_reference_uid, c.status, c.finalized_at, c.created_at
+FROM cases c
+WHERE EXISTS (
+    SELECT 1 FROM reads r
+    WHERE r.case_id = c.id AND r.kind = 'initial' AND r.reader_user_id = $1
+)
+OR (
+    NOT EXISTS (
+        SELECT 1 FROM reads r WHERE r.case_id = c.id AND r.kind = 'initial'
+    )
+    AND EXISTS (
+        SELECT 1 FROM events e
+        WHERE e.case_id = c.id AND e.action = 'case_imported' AND e.actor_user_id = $1
+    )
+)
+ORDER BY c.created_at DESC, c.id DESC
+LIMIT $2
+`
+
+type ListCasesByReaderParams struct {
+	UserID   int64
+	RowLimit int32
+}
+
+// A reader's own cases. Before an initial read exists the importer is the
+// owner, so a case confirmed by this user still appears; once any reader has
+// started the initial read, only that reader sees it. The projection matches
+// GetCase so the transport allowlist stays identical.
+func (q *Queries) ListCasesByReader(ctx context.Context, arg ListCasesByReaderParams) ([]Case, error) {
+	rows, err := q.db.Query(ctx, listCasesByReader, arg.UserID, arg.RowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Case{}
+	for rows.Next() {
+		var i Case
+		if err := rows.Scan(
+			&i.ID,
+			&i.Source,
+			&i.StudyInstanceUid,
+			&i.SeriesInstanceUid,
+			&i.OrthancSeriesID,
+			&i.FrameOfReferenceUid,
+			&i.Status,
+			&i.FinalizedAt,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const updateCaseState = `-- name: UpdateCaseState :one
 UPDATE cases
 SET status = $2, finalized_at = $3

@@ -29,10 +29,15 @@ function originLabel(mark: ReadMark): string | null {
 
 export default function MarkList({ draft, editable, onFocus, onRemove }: MarkListProps) {
   if (draft.length === 0) {
-    return <p className="mark-empty">Chưa có dấu nào. Chọn “Đo nốt” rồi kéo trên ảnh để thêm dấu.</p>
+    return (
+      <div className="empty-state mark-empty">
+        <p>Chưa có dấu nào.</p>
+        <p className="panel-sub">Chọn “Đo nốt” rồi kéo trên ảnh để thêm dấu.</p>
+      </div>
+    )
   }
   return (
-    <ol className="mark-list">
+    <ol className="mark-list" aria-label="Danh sách dấu đã đo">
       {draft.map((entry, index) => {
         const label = originLabel(entry.mark)
         return (
@@ -46,7 +51,7 @@ export default function MarkList({ draft, editable, onFocus, onRemove }: MarkLis
             {editable && (
               <button
                 type="button"
-                className="mark-delete"
+                className="button-quiet mark-delete"
                 onClick={() => onRemove(entry.localId)}
                 aria-label={`Xóa dấu ${index + 1}`}
               >

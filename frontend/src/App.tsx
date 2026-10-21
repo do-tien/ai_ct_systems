@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import CasePage from './CasePage.tsx'
+import Dashboard from './Dashboard.tsx'
 import LoginPanel from './LoginPanel.tsx'
-import UploadPanel from './UploadPanel.tsx'
 import UserBar from './UserBar.tsx'
 import {
   AuthApiError,
@@ -320,93 +320,95 @@ export default function App() {
   }, [])
 
   return (
-    <main className="page">
-      <header className="page-header">
-        <h1>Nodule Reader — công cụ nghiên cứu</h1>
-        <p className="notice">
-          Công cụ nghiên cứu hỗ trợ đọc CT lồng ngực: bác sĩ đọc độc lập trước, sau đó xem xét các
-          điểm không đồng ý với gợi ý hỗ trợ và giữ quyết định cuối cùng. Không dùng để chẩn đoán.
-        </p>
-      </header>
-
-      {auth.status === 'loading' && (
-        <section className="panel auth-loading" aria-busy="true">
-          <p role="status">Đang kiểm tra phiên làm việc…</p>
-        </section>
-      )}
-
-      {auth.status === 'failed' && (
-        <section className="panel auth-failure" aria-labelledby="auth-failure-heading">
-          <h2 id="auth-failure-heading">Không mở được phiên làm việc</h2>
-          <p className="error" role="alert">
-            {auth.message}
-          </p>
-          <button type="button" onClick={() => void loadAuthSession()}>
-            Thử lại
-          </button>
-        </section>
-      )}
-
-      {auth.status === 'anonymous' && (
-        <LoginPanel
-          pending={loginPending}
-          error={loginError}
-          onLogin={(pin) => void submitLogin(pin)}
-        />
-      )}
-
-      {auth.status === 'authenticated' && (
-        <>
+    <div className="app">
+      <header className="app-header">
+        <a className="brand" href="/" aria-label="Nodule Reader, về trang chủ">
+          <span className="brand-mark" aria-hidden="true">
+            NR
+          </span>
+          <span className="brand-text">
+            <strong>Nodule Reader</strong>
+            <small>Công cụ nghiên cứu CT lồng ngực</small>
+          </span>
+        </a>
+        {auth.status === 'authenticated' ? (
           <UserBar
             displayName={auth.session.user.displayName}
             pending={logoutPending}
             onLogout={submitLogout}
           />
-
-          {caseId === null ? (
-            <>
-              <UploadPanel onOpenCase={openCase} />
-              <p className="notice">
-                Một ca đã nhập vẫn mở trực tiếp được bằng địa chỉ <code>/?case=&lt;id&gt;</code>, ví
-                dụ <code>/?case=1</code>.
-              </p>
-            </>
-          ) : (
-            <CasePage caseId={caseId} />
-          )}
-        </>
-      )}
-
-      <details className="panel diagnostics">
-        <summary>Chẩn đoán kết nối</summary>
-
-        <table className="status-table">
-          <thead>
-            <tr>
-              <th scope="col">Thành phần</th>
-              <th scope="col">Trạng thái</th>
-            </tr>
-          </thead>
-          <tbody>
-            {CHECK_ORDER.map((name) => (
-              <tr key={name}>
-                <th scope="row">{CHECK_LABELS[name]}</th>
-                <td className={`status status-${rows[name]}`}>{ROW_TEXT[rows[name]]}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-
-        <button type="button" onClick={() => void runCheck()} disabled={pending}>
-          Kiểm tra lại
-        </button>
-
-        {error !== null && (
-          <p className="error" role="alert">
-            {error}
-          </p>
+        ) : (
+          <span className="app-badge">Không dùng để chẩn đoán</span>
         )}
-      </details>
-    </main>
+      </header>
+
+      <main className="page">
+        {auth.status === 'loading' && (
+          <section className="panel auth-loading" aria-busy="true">
+            <p role="status">Đang kiểm tra phiên làm việc…</p>
+          </section>
+        )}
+
+        {auth.status === 'failed' && (
+          <section className="panel auth-failure" aria-labelledby="auth-failure-heading">
+            <h2 id="auth-failure-heading">Không mở được phiên làm việc</h2>
+            <p className="error" role="alert">
+              {auth.message}
+            </p>
+            <button type="button" className="button-primary" onClick={() => void loadAuthSession()}>
+              Thử lại
+            </button>
+          </section>
+        )}
+
+        {auth.status === 'anonymous' && (
+          <LoginPanel
+            pending={loginPending}
+            error={loginError}
+            onLogin={(pin) => void submitLogin(pin)}
+          />
+        )}
+
+        {auth.status === 'authenticated' && (caseId === null ? <Dashboard onOpenCase={openCase} /> : <CasePage caseId={caseId} />)}
+      </main>
+
+      <footer className="app-footer">
+        <p className="footer-note">
+          Công cụ nghiên cứu hỗ trợ đọc CT lồng ngực: bác sĩ đọc độc lập trước, sau đó xem xét các
+          điểm không đồng ý với gợi ý hỗ trợ và giữ quyết định cuối cùng. Không dùng để chẩn đoán.
+        </p>
+
+        <details className="diagnostics">
+          <summary>Chẩn đoán kết nối</summary>
+
+          <table className="status-table">
+            <thead>
+              <tr>
+                <th scope="col">Thành phần</th>
+                <th scope="col">Trạng thái</th>
+              </tr>
+            </thead>
+            <tbody>
+              {CHECK_ORDER.map((name) => (
+                <tr key={name}>
+                  <th scope="row">{CHECK_LABELS[name]}</th>
+                  <td className={`status status-${rows[name]}`}>{ROW_TEXT[rows[name]]}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          <button type="button" className="button-quiet" onClick={() => void runCheck()} disabled={pending}>
+            Kiểm tra lại
+          </button>
+
+          {error !== null && (
+            <p className="error" role="alert">
+              {error}
+            </p>
+          )}
+        </details>
+      </footer>
+    </div>
   )
 }

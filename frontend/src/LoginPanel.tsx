@@ -34,7 +34,10 @@ export default function LoginPanel({ error, pending, onLogin }: LoginPanelProps)
 
   return (
     <section className="panel login-panel" aria-labelledby="login-heading">
-      <h2 id="login-heading">Đăng nhập</h2>
+      <p className="eyebrow">Phiên làm việc riêng</p>
+      <h1 id="login-heading" className="login-title">
+        Đăng nhập
+      </h1>
       <p className="login-hint">
         Nhập mã PIN 8 chữ số để bắt đầu phiên làm việc riêng của bác sĩ.
       </p>
@@ -75,7 +78,7 @@ export default function LoginPanel({ error, pending, onLogin }: LoginPanelProps)
           </p>
         )}
 
-        <button type="submit" disabled={pending}>
+        <button type="submit" className="button-primary login-submit" disabled={pending}>
           {pending ? 'Đang đăng nhập…' : 'Đăng nhập'}
         </button>
       </form>

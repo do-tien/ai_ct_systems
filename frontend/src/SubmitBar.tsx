@@ -16,22 +16,30 @@ interface SubmitBarProps {
   onSubmit: () => void
 }
 
-function statusText(phase: WorkflowPhase, dirty: boolean, error: string | null): { text: string; alert: boolean } {
+type Tone = 'success' | 'warning' | 'info' | 'danger' | 'neutral'
+
+function statusText(
+  phase: WorkflowPhase,
+  dirty: boolean,
+  error: string | null,
+): { text: string; alert: boolean; tone: Tone } {
   switch (phase) {
     case 'locked':
-      return { text: 'Bản đọc đầu đã khóa; chỉnh sửa tiếp theo thuộc bản cuối.', alert: false }
+      return { text: 'Đã khóa bản đọc đầu', alert: false, tone: 'neutral' }
     case 'saving':
-      return { text: 'Đang lưu…', alert: false }
+      return { text: 'Đang lưu…', alert: false, tone: 'info' }
     case 'submitting':
-      return { text: 'Đang nộp và khóa…', alert: false }
+      return { text: 'Đang nộp và khóa…', alert: false, tone: 'info' }
     case 'reconciling':
-      return { text: 'Đang đối chiếu với máy chủ…', alert: false }
+      return { text: 'Đang đối chiếu với máy chủ…', alert: false, tone: 'info' }
     case 'conflict':
-      return { text: error ?? 'Bản nháp xung đột với máy chủ.', alert: true }
+      return { text: error ?? 'Bản nháp xung đột với máy chủ.', alert: true, tone: 'danger' }
     case 'error':
-      return { text: error ?? 'Không lưu được bản nháp.', alert: true }
+      return { text: error ?? 'Không lưu được bản nháp.', alert: true, tone: 'danger' }
     default:
-      return dirty ? { text: 'Chưa lưu', alert: false } : { text: 'Đã lưu', alert: false }
+      return dirty
+        ? { text: 'Có thay đổi chưa lưu', alert: false, tone: 'warning' }
+        : { text: 'Đã lưu trên máy chủ', alert: false, tone: 'success' }
   }
 }
 
@@ -43,27 +51,28 @@ export default function SubmitBar({ phase, error, dirty, busy, drawing, canEdit,
 
   return (
     <div className="submit-bar">
-      <p className={status.alert ? 'submit-status error' : 'submit-status'} aria-live="polite" role={status.alert ? 'alert' : undefined}>
-        {drawing ? 'Đang vẽ dấu…' : status.text}
+      <p className="save-status" aria-live="polite" role={status.alert ? 'alert' : undefined}>
+        <span className={`chip chip-${status.tone}`}>{drawing ? 'Đang vẽ dấu…' : status.text}</span>
       </p>
 
       {!locked && !confirming && (
         <div className="submit-actions">
-          <button type="button" onClick={onSave} disabled={controlsDisabled}>
+          <button type="button" className="button-secondary" onClick={onSave} disabled={controlsDisabled}>
             Lưu nháp
           </button>
-          <button type="button" onClick={() => setConfirming(true)} disabled={controlsDisabled}>
+          <button type="button" className="button-primary" onClick={() => setConfirming(true)} disabled={controlsDisabled}>
             Nộp và khóa
           </button>
         </div>
       )}
 
       {!locked && confirming && (
-        <div className="submit-confirm" role="alertdialog" aria-label="Xác nhận nộp bản đọc đầu">
+        <div className="confirm-card" role="alertdialog" aria-label="Xác nhận nộp bản đọc đầu">
           <p>Nộp sẽ khóa bản đọc đầu và không thể sửa lại; các chỉnh sửa sau thuộc bản cuối. Tiếp tục?</p>
           <div className="submit-actions">
             <button
               type="button"
+              className="button-primary"
               onClick={() => {
                 setConfirming(false)
                 onSubmit()
@@ -72,7 +81,7 @@ export default function SubmitBar({ phase, error, dirty, busy, drawing, canEdit,
             >
               Xác nhận nộp và khóa
             </button>
-            <button type="button" onClick={() => setConfirming(false)}>
+            <button type="button" className="button-quiet" onClick={() => setConfirming(false)}>
               Hủy
             </button>
           </div>

@@ -22,6 +22,22 @@ func (s *Service) GetCase(ctx context.Context, caseID int64) (Case, error) {
 	return s.store.GetCase(ctx, caseID)
 }
 
+// MaxCaseList bounds one owned-case listing. The transport asks for the
+// maximum; a larger caller value is clamped instead of rejected.
+const MaxCaseList = 50
+
+// ListCases returns the authenticated reader's cases, newest first, as the same
+// allowlisted projection as GetCase. It never consults AI state.
+func (s *Service) ListCases(ctx context.Context, userID int64, limit int) ([]Case, error) {
+	if userID <= 0 {
+		return nil, fail(ErrInvalid, "a valid user is required")
+	}
+	if limit <= 0 || limit > MaxCaseList {
+		limit = MaxCaseList
+	}
+	return s.store.ListCases(ctx, userID, limit)
+}
+
 // GetInitial returns the authenticated owner's initial read, creating an empty
 // draft when the case is still awaiting its read and none exists. A read owned
 // by another user is forbidden.

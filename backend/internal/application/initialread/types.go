@@ -106,6 +106,7 @@ type Read struct {
 // classifies failures into the sentinel categories above.
 type Store interface {
 	GetCase(ctx context.Context, caseID int64) (Case, error)
+	ListCases(ctx context.Context, userID int64, limit int) ([]Case, error)
 	GetOrCreateInitial(ctx context.Context, caseID, userID int64) (Read, error)
 	ReplaceInitialMarks(ctx context.Context, caseID, userID int64, marks []Mark) ([]Mark, error)
 	SubmitInitial(ctx context.Context, caseID, userID int64) (SubmitResult, error)

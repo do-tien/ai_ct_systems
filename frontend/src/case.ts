@@ -58,6 +58,22 @@ export function parseCaseMetadata(payload: unknown, expectedId: number): CaseMet
   if (typeof body.id !== 'number' || !Number.isInteger(body.id) || body.id !== expectedId) {
     throw new CaseError('case metadata id does not match the requested case')
   }
+  return parseCaseBody(body)
+}
+
+// One row of the owned-case list: the same allowlist as the single-case
+// response, validated without a requested id to compare against.
+export function parseCaseSummary(payload: unknown): CaseMetadata {
+  if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) {
+    throw new CaseError('case list entry is not an object')
+  }
+  return parseCaseBody(payload as Record<string, unknown>)
+}
+
+function parseCaseBody(body: Record<string, unknown>): CaseMetadata {
+  if (typeof body.id !== 'number' || !Number.isInteger(body.id) || body.id <= 0) {
+    throw new CaseError('case id is not a positive integer')
+  }
   if (typeof body.source !== 'string' || body.source.length === 0) {
     throw new CaseError('case source is missing')
   }

@@ -62,6 +62,7 @@ function formatBytes(value: number): string {
 export default function UploadPanel({ onOpenCase }: UploadPanelProps) {
   const [state, setState] = useState<UploadState>(EMPTY_STATE)
   const [selected, setSelected] = useState<File[]>([])
+  const [dragging, setDragging] = useState(false)
   const controllerRef = useRef<UploadController | null>(null)
   const openedRef = useRef(false)
 
@@ -113,34 +114,56 @@ export default function UploadPanel({ onOpenCase }: UploadPanelProps) {
 
   return (
     <section className="panel upload-panel" aria-labelledby="upload-heading">
-      <h2 id="upload-heading">Nhập ca CT từ dữ liệu DICOM</h2>
-      <p className="notice">
-        Hỗ trợ file DICOM <code>.dcm</code>, file không đuôi, thư mục có thư mục con và archive
-        ZIP/TAR/TAR.GZ. DICOMDIR, <code>.DS_Store</code>, <code>Thumbs.db</code> và{' '}
-        <code>__MACOSX</code> được bỏ qua. Không hỗ trợ NIfTI, NRRD, MetaImage, ảnh thường, RAR/7z,
-        archive lồng nhau hoặc tải từ URL.
-      </p>
+      <div className="panel-heading">
+        <div>
+          <h2 id="upload-heading">Nhập ca CT</h2>
+          <p className="panel-sub">Dữ liệu DICOM của một series CT; ca được tạo sau khi bạn xác nhận series.</p>
+        </div>
+      </div>
 
-      <div className="upload-picker">
-        <label>
-          Chọn file
-          <input
-            type="file"
-            multiple
-            disabled={busy}
-            onChange={(event) => onFilesChosen(event.target.files)}
-          />
-        </label>
-        <label>
-          Chọn thư mục
-          <input
-            type="file"
-            multiple
-            disabled={busy}
-            onChange={(event) => onFilesChosen(event.target.files)}
-            {...({ webkitdirectory: '', directory: '' } as Record<string, string>)}
-          />
-        </label>
+      <div
+        className={dragging ? 'dropzone dropzone-active' : 'dropzone'}
+        onDragOver={(event) => {
+          if (busy) {
+            return
+          }
+          event.preventDefault()
+          setDragging(true)
+        }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={(event) => {
+          event.preventDefault()
+          setDragging(false)
+          if (!busy) {
+            onFilesChosen(event.dataTransfer.files)
+          }
+        }}
+      >
+        <p className="dropzone-title">Kéo thả file DICOM hoặc archive vào đây</p>
+        <p className="dropzone-hint">hoặc chọn từ máy</p>
+        <div className="upload-picker">
+          <label className={busy ? 'button-secondary file-button disabled' : 'button-secondary file-button'}>
+            Chọn file
+            <input
+              type="file"
+              multiple
+              className="visually-hidden"
+              disabled={busy}
+              onChange={(event) => onFilesChosen(event.target.files)}
+            />
+          </label>
+          <label className={busy ? 'button-quiet file-button disabled' : 'button-quiet file-button'}>
+            Chọn thư mục
+            <input
+              type="file"
+              multiple
+              className="visually-hidden"
+              disabled={busy}
+              onChange={(event) => onFilesChosen(event.target.files)}
+              {...({ webkitdirectory: '', directory: '' } as Record<string, string>)}
+            />
+          </label>
+        </div>
       </div>
 
       <p className="upload-summary">
@@ -150,11 +173,16 @@ export default function UploadPanel({ onOpenCase }: UploadPanelProps) {
       </p>
 
       <div className="upload-actions">
-        <button type="button" onClick={startUpload} disabled={busy || selected.length === 0}>
+        <button type="button" className="button-primary" onClick={startUpload} disabled={busy || selected.length === 0}>
           Tải lên và kiểm tra
         </button>
         {busy && (
-          <button type="button" onClick={() => controllerRef.current?.reset()} disabled={state.phase === 'confirming'}>
+          <button
+            type="button"
+            className="button-quiet"
+            onClick={() => controllerRef.current?.reset()}
+            disabled={state.phase === 'confirming'}
+          >
             Hủy
           </button>
         )}
@@ -165,7 +193,14 @@ export default function UploadPanel({ onOpenCase }: UploadPanelProps) {
       </p>
 
       {state.progress !== null && (
-        <div className="upload-progress" aria-hidden="true">
+        <div
+          className="upload-progress"
+          role="progressbar"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={progressPercent}
+          aria-label="Tiến độ tải lên"
+        >
           <div className="upload-progress-bar" style={{ width: `${progressPercent}%` }} />
         </div>
       )}
@@ -175,13 +210,13 @@ export default function UploadPanel({ onOpenCase }: UploadPanelProps) {
           <p className="upload-summary">
             {state.session.series.length} series trong lượt tải lên
             {state.session.skipped_files > 0 ? `, bỏ qua ${state.session.skipped_files} mục chỉ mục/phụ` : ''}
-            {state.restored ? ' (khôi phục từ tab này sau khi tải lại trang)' : ''}.
+            {state.restored ? ' (khôi phục sau khi tải lại trang)' : ''}.
           </p>
           <ul className="upload-series">
             {state.session.series.map((option) => {
               const disabled = !option.suitable || busy
               return (
-                <li key={option.id}>
+                <li key={option.id} className={option.suitable ? 'series-option' : 'series-option series-option-disabled'}>
                   <label>
                     <input
                       type="radio"
@@ -192,7 +227,7 @@ export default function UploadPanel({ onOpenCase }: UploadPanelProps) {
                       onChange={() => controllerRef.current?.choose(option.id)}
                     />
                     <span>
-                      Series {option.index} — {option.modality || 'không rõ modality'} —{' '}
+                      Series {option.index} · {option.modality || 'không rõ modality'} ·{' '}
                       {option.instance_count} lát cắt
                     </span>
                   </label>
@@ -213,6 +248,7 @@ export default function UploadPanel({ onOpenCase }: UploadPanelProps) {
       {state.phase === 'choosing' && (
         <button
           type="button"
+          className="button-primary"
           onClick={() => void controllerRef.current?.confirmSelection()}
           disabled={state.selectedSeriesId === null}
         >
@@ -223,13 +259,13 @@ export default function UploadPanel({ onOpenCase }: UploadPanelProps) {
       {state.phase === 'confirming' && <p className="upload-summary">Đang tạo ca từ series đã chọn…</p>}
 
       {state.phase === 'uncertain' && (
-        <button type="button" onClick={() => void controllerRef.current?.reconcile()}>
+        <button type="button" className="button-secondary" onClick={() => void controllerRef.current?.reconcile()}>
           Kiểm tra kết quả
         </button>
       )}
 
       {state.session !== null && !busy && (
-        <button type="button" onClick={() => void controllerRef.current?.discard()}>
+        <button type="button" className="button-quiet" onClick={() => void controllerRef.current?.discard()}>
           Bỏ lượt tải lên này
         </button>
       )}
@@ -239,6 +275,15 @@ export default function UploadPanel({ onOpenCase }: UploadPanelProps) {
           {state.error}
         </p>
       )}
+
+      <details className="format-note">
+        <summary>Định dạng hỗ trợ</summary>
+        <p>
+          File DICOM <code>.dcm</code>, file không đuôi, thư mục có thư mục con và archive ZIP/TAR/TAR.GZ.
+          DICOMDIR, <code>.DS_Store</code>, <code>Thumbs.db</code> và <code>__MACOSX</code> được bỏ qua. Không hỗ
+          trợ NIfTI, NRRD, MetaImage, ảnh thường, RAR/7z, archive lồng nhau hoặc tải từ URL.
+        </p>
+      </details>
     </section>
   )
 }

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { Enums, EVENTS, RenderingEngine, cache, eventTarget } from '@cornerstonejs/core'
 import type { StackViewport } from '@cornerstonejs/core'
 import { Enums as ToolEnums, LengthTool, StackScrollTool, ToolGroupManager, WindowLevelTool, ZoomTool, Types as ToolkitTypes } from '@cornerstonejs/tools'
@@ -589,26 +590,87 @@ export default function Viewer({ caseMetadata, openedAt, onRetry, initialRead, f
     void viewport.setImageIdIndex(next).catch(() => {})
   }, [])
 
+  // Shortcuts belong to the focused image stage, not the whole page: arrow keys
+  // must keep scrolling the page when the physician is reading the sidebar.
+  const onStageKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>): void => {
+    if (event.altKey || event.ctrlKey || event.metaKey || phase !== 'ready') {
+      return
+    }
+    const target = event.target as HTMLElement
+    if (target !== event.currentTarget && (target.tagName === 'BUTTON' || target.isContentEditable)) {
+      return
+    }
+    switch (event.key) {
+      case 'ArrowLeft':
+      case 'ArrowUp':
+        event.preventDefault()
+        step(-1)
+        break
+      case 'ArrowRight':
+      case 'ArrowDown':
+        event.preventDefault()
+        step(1)
+        break
+      case 'w':
+      case 'W':
+        event.preventDefault()
+        setMode('window')
+        break
+      case 'z':
+      case 'Z':
+        event.preventDefault()
+        setMode('zoom')
+        break
+      case 'm':
+      case 'M':
+        if (hasRead && canEdit) {
+          event.preventDefault()
+          setMode('measure')
+        }
+        break
+      default:
+        break
+    }
+  }
+
   const usable = phase === 'ready'
 
   return (
     <section className="panel viewer" aria-labelledby="viewer-heading">
-      <h2 id="viewer-heading">Ảnh CT trục</h2>
-      <p className="notice">
-        Ca #{caseMetadata.id} — công cụ nghiên cứu, không có lớp phủ AI và không dùng để chẩn đoán.
-      </p>
+      <div className="panel-heading">
+        <div>
+          <h2 id="viewer-heading">Ảnh CT trục</h2>
+          <p className="panel-sub">Nghiên cứu; không có lớp phủ AI và không dùng để chẩn đoán.</p>
+        </div>
+        <span className="viewer-counter" aria-live="polite">
+          {usable ? `${sliceIndex + 1} / ${total}` : '—'}
+        </span>
+      </div>
 
       <div className="viewer-toolbar" role="group" aria-label="Chế độ chuột">
-        <button type="button" className={mode === 'window' ? 'active' : ''} disabled={!usable} onClick={() => setMode('window')}>
+        <button
+          type="button"
+          className={mode === 'window' ? 'active' : ''}
+          aria-pressed={mode === 'window'}
+          disabled={!usable}
+          onClick={() => setMode('window')}
+        >
           Cửa sổ / mức
         </button>
-        <button type="button" className={mode === 'zoom' ? 'active' : ''} disabled={!usable} onClick={() => setMode('zoom')}>
+        <button
+          type="button"
+          className={mode === 'zoom' ? 'active' : ''}
+          aria-pressed={mode === 'zoom'}
+          disabled={!usable}
+          onClick={() => setMode('zoom')}
+        >
           Thu phóng
         </button>
         {hasRead && (
           <button
             type="button"
             className={mode === 'measure' ? 'active' : ''}
+            aria-pressed={mode === 'measure'}
             disabled={!usable || !canEdit}
             onClick={() => setMode('measure')}
           >
@@ -619,15 +681,35 @@ export default function Viewer({ caseMetadata, openedAt, onRetry, initialRead, f
         <button type="button" disabled={!usable || sliceIndex <= 0} onClick={() => step(-1)}>
           Lát trước
         </button>
-        <span className="viewer-counter" aria-live="polite">
-          {usable ? `${sliceIndex + 1} / ${total}` : '—'}
-        </span>
         <button type="button" disabled={!usable || sliceIndex >= total - 1} onClick={() => step(1)}>
           Lát sau
         </button>
       </div>
 
-      <div className="viewer-stage">
+      <p className="viewer-hint">
+        <span>
+          <kbd>←</kbd>
+          <kbd>→</kbd> đổi lát
+        </span>
+        <span>
+          <kbd>W</kbd> cửa sổ/mức
+        </span>
+        <span>
+          <kbd>Z</kbd> thu phóng
+        </span>
+        {hasRead && (
+          <span>
+            <kbd>M</kbd> đo nốt
+          </span>
+        )}
+      </p>
+
+      <div
+        className="viewer-stage"
+        tabIndex={0}
+        aria-label="Vùng ảnh CT. Nhấn để dùng phím tắt đổi lát."
+        onKeyDown={onStageKeyDown}
+      >
         <div className="viewer-canvas" ref={elementRef} />
         {labels !== null && (
           <div className="viewer-labels" aria-hidden="true">
@@ -641,7 +723,7 @@ export default function Viewer({ caseMetadata, openedAt, onRetry, initialRead, f
         {phase === 'error' && message !== null && (
           <div className="viewer-overlay viewer-overlay-error" role="alert">
             <p>{message}</p>
-            <button type="button" onClick={onRetry}>
+            <button type="button" className="button-primary" onClick={onRetry}>
               Thử lại
             </button>
           </div>

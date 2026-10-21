@@ -87,6 +87,10 @@ type caseResponse struct {
 	FinalizedAt         *time.Time `json:"finalized_at"`
 }
 
+type caseListResponse struct {
+	Cases []caseResponse `json:"cases"`
+}
+
 type readResponse struct {
 	ID       int64          `json:"id"`
 	CaseID   int64          `json:"case_id"`
@@ -148,7 +152,13 @@ func (h *initialReadHandler) getCase(writer http.ResponseWriter, request *http.R
 		writeAPIError(writer, err)
 		return
 	}
-	writeJSON(writer, http.StatusOK, caseResponse{
+	writeJSON(writer, http.StatusOK, toCaseResponse(value))
+}
+
+// toCaseResponse maps the allowlisted use-case projection. It is shared by the
+// single-case and owned-case-list routes so both expose exactly the same keys.
+func toCaseResponse(value initialread.Case) caseResponse {
+	return caseResponse{
 		ID:                  value.ID,
 		Source:              value.Source,
 		StudyInstanceUID:    value.StudyInstanceUID,
@@ -157,7 +167,24 @@ func (h *initialReadHandler) getCase(writer http.ResponseWriter, request *http.R
 		Status:              value.Status,
 		CreatedAt:           value.CreatedAt,
 		FinalizedAt:         value.FinalizedAt,
-	})
+	}
+}
+
+func (h *initialReadHandler) listCases(writer http.ResponseWriter, request *http.Request) {
+	principal, ok := requirePrincipal(writer, request)
+	if !ok {
+		return
+	}
+	values, err := h.service.ListCases(request.Context(), principal.UserID, initialread.MaxCaseList)
+	if err != nil {
+		writeAPIError(writer, err)
+		return
+	}
+	cases := make([]caseResponse, 0, len(values))
+	for _, value := range values {
+		cases = append(cases, toCaseResponse(value))
+	}
+	writeJSON(writer, http.StatusOK, caseListResponse{Cases: cases})
 }
 
 func (h *initialReadHandler) getInitial(writer http.ResponseWriter, request *http.Request) {

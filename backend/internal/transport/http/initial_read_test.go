@@ -39,6 +39,18 @@ type stubInitialStore struct {
 	lastCaseID   int64
 	lastUserID   int64
 	lastMarks    []initialread.Mark
+
+	listResult []initialread.Case
+	listErr    error
+	listCalls  int
+	listLimit  int
+}
+
+func (s *stubInitialStore) ListCases(_ context.Context, userID int64, limit int) ([]initialread.Case, error) {
+	s.listCalls++
+	s.lastUserID = userID
+	s.listLimit = limit
+	return s.listResult, s.listErr
 }
 
 func (s *stubInitialStore) GetCase(_ context.Context, caseID int64) (initialread.Case, error) {
@@ -185,6 +197,95 @@ func TestInitialReadAPICaseMetadata(t *testing.T) {
 		if _, present := object[forbidden]; present {
 			t.Fatalf("case metadata leaked %q: %s", forbidden, recorder.Body.String())
 		}
+	}
+}
+
+func TestInitialReadAPICaseList(t *testing.T) {
+	newer := stubCase()
+	newer.ID = 6
+	newer.Status = "finalized"
+	store := &stubInitialStore{listResult: []initialread.Case{newer, stubCase()}}
+	recorder := doInitialRequest(store, http.MethodGet, "/api/cases", "", nil)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", recorder.Code)
+	}
+	assertNoStore(t, recorder)
+	if store.listCalls != 1 {
+		t.Fatalf("list calls = %d, want 1", store.listCalls)
+	}
+	if store.lastUserID != 7 {
+		t.Fatalf("user = %d, want fixed principal 7", store.lastUserID)
+	}
+	if store.listLimit != initialread.MaxCaseList {
+		t.Fatalf("limit = %d, want %d", store.listLimit, initialread.MaxCaseList)
+	}
+	if store.readCalls != 0 || store.caseCalls != 0 {
+		t.Fatalf("list touched other reads: %+v", store)
+	}
+
+	var envelope struct {
+		Cases []json.RawMessage `json:"cases"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &envelope); err != nil {
+		t.Fatalf("case list body: %v", err)
+	}
+	assertKeys(t, "case list", recorder.Body.Bytes(), "cases")
+	if len(envelope.Cases) != 2 {
+		t.Fatalf("cases = %d, want 2", len(envelope.Cases))
+	}
+	for _, raw := range envelope.Cases {
+		assertKeys(t, "case summary", raw,
+			"id", "source", "study_instance_uid", "series_instance_uid",
+			"frame_of_reference_uid", "status", "created_at", "finalized_at")
+		for _, forbidden := range []string{"orthanc_series_id", "ai_status", "ai_job", "candidates", "score", "model", "result"} {
+			var object map[string]json.RawMessage
+			if err := json.Unmarshal(raw, &object); err != nil {
+				t.Fatalf("case summary: %v", err)
+			}
+			if _, present := object[forbidden]; present {
+				t.Fatalf("case summary leaked %q: %s", forbidden, raw)
+			}
+		}
+	}
+	var first map[string]any
+	if err := json.Unmarshal(envelope.Cases[0], &first); err != nil {
+		t.Fatalf("first case: %v", err)
+	}
+	if first["id"] != float64(6) {
+		t.Fatalf("first id = %v, want 6 (newest first)", first["id"])
+	}
+}
+
+func TestInitialReadAPICaseListEmpty(t *testing.T) {
+	store := &stubInitialStore{listResult: nil}
+	recorder := doInitialRequest(store, http.MethodGet, "/api/cases", "", nil)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", recorder.Code)
+	}
+	var envelope struct {
+		Cases []json.RawMessage `json:"cases"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &envelope); err != nil {
+		t.Fatalf("body: %v", err)
+	}
+	if envelope.Cases == nil || len(envelope.Cases) != 0 {
+		t.Fatalf("cases = %v, want an empty array (not null)", envelope.Cases)
+	}
+	if !strings.Contains(recorder.Body.String(), `"cases":[]`) {
+		t.Fatalf("body = %s, want an empty array", recorder.Body.String())
+	}
+}
+
+func TestInitialReadAPICaseListDependencyFailure(t *testing.T) {
+	store := &stubInitialStore{listErr: errors.New("db down")}
+	recorder := doInitialRequest(store, http.MethodGet, "/api/cases", "", nil)
+	if recorder.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", recorder.Code)
+	}
+	code, message := decodeAPIError(t, recorder)
+	if code != codeInternalError || strings.Contains(message, "db down") {
+		t.Fatalf("error = %s/%s", code, message)
 	}
 }
 

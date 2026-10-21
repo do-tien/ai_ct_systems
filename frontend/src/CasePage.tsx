@@ -16,6 +16,7 @@ import type { ReadAnnotationSession } from './viewer/readAnnotations.ts'
 import type { ViewerSession } from './viewer/Viewer.tsx'
 import Viewer from './viewer/Viewer.tsx'
 import AiPanel from './AiPanel.tsx'
+import CaseHeader from './CaseHeader.tsx'
 import FinalizeBar from './FinalizeBar.tsx'
 import MarkList from './MarkList.tsx'
 import SubmitBar from './SubmitBar.tsx'
@@ -93,7 +94,7 @@ export default function CasePage({ caseId }: { caseId: number }) {
             {error}
           </p>
         )}
-        <button type="button" onClick={() => void run()} disabled={pending}>
+        <button type="button" className="button-secondary" onClick={() => void run()} disabled={pending}>
           Thử lại
         </button>
       </section>
@@ -108,7 +109,7 @@ export default function CasePage({ caseId }: { caseId: number }) {
         <p className="error" role="alert">
           {CONFLICT_MESSAGE}
         </p>
-        <button type="button" onClick={() => void run()}>
+        <button type="button" className="button-primary" onClick={() => void run()}>
           Tải lại
         </button>
       </section>
@@ -226,59 +227,77 @@ function InitialReadPane({
   const dirty = state.revision > state.savedRevision
 
   return (
-    <>
-      <Viewer
-        caseMetadata={caseMetadata}
-        openedAt={openedAt}
-        onRetry={onReload}
-        initialRead={{
-          draft: state.draft,
-          editable: viewerEditable,
-          sessionEpoch: state.snapshotEpoch,
-          onDraftChange: (draft) => workflowRef.current?.replaceDraft(draft),
-          onDrawingChange: setDrawing,
-          onError: (message) => setBlocked(message),
-          onSession: (session) => {
-            sessionRef.current = session
-          },
-        }}
-      />
+    <div className="case-workspace">
+      <CaseHeader caseMetadata={caseMetadata} stage="independent" />
 
-      <section className="panel" aria-labelledby="initial-read-heading">
-        <h2 id="initial-read-heading">Bản đọc đầu độc lập</h2>
-        <p className="notice">Tọa độ LPS mm; tên ca và bản đọc không chứa thông tin AI.</p>
+      <div className="case-grid">
+        <div className="case-viewer">
+          <Viewer
+            caseMetadata={caseMetadata}
+            openedAt={openedAt}
+            onRetry={onReload}
+            initialRead={{
+              draft: state.draft,
+              editable: viewerEditable,
+              sessionEpoch: state.snapshotEpoch,
+              onDraftChange: (draft) => workflowRef.current?.replaceDraft(draft),
+              onDrawingChange: setDrawing,
+              onError: (message) => setBlocked(message),
+              onSession: (session) => {
+                sessionRef.current = session
+              },
+            }}
+          />
+        </div>
 
-        {blocked !== null && (
-          <p className="error" role="alert">
-            {blocked}
-          </p>
-        )}
+        <aside className="case-sidebar" aria-label="Bản đọc đầu">
+          <section className="panel read-panel" aria-labelledby="initial-read-heading">
+            <div className="panel-heading">
+              <div>
+                <h2 id="initial-read-heading">Bản đọc đầu độc lập</h2>
+                <p className="panel-sub">Tọa độ LPS mm; không có thông tin AI trước khi khóa.</p>
+              </div>
+              <span className="count-chip">{state.draft.length} dấu</span>
+            </div>
 
-        <MarkList
-          draft={state.draft}
-          editable={rowEditable}
-          onFocus={(localId) => void sessionRef.current?.focus(localId)}
-          onRemove={(localId) => sessionRef.current?.remove(localId)}
-        />
+            {blocked !== null && (
+              <p className="error" role="alert">
+                {blocked}
+              </p>
+            )}
 
-        <SubmitBar
-          phase={state.phase}
-          error={state.error}
-          dirty={dirty}
-          busy={busy}
-          drawing={drawing}
-          canEdit={viewerEditable}
-          onSave={() => void workflowRef.current?.save()}
-          onSubmit={() => void workflowRef.current?.submit()}
-        />
+            <MarkList
+              draft={state.draft}
+              editable={rowEditable}
+              onFocus={(localId) => void sessionRef.current?.focus(localId)}
+              onRemove={(localId) => sessionRef.current?.remove(localId)}
+            />
 
-        {(state.phase === 'error' || state.phase === 'conflict') && (
-          <button type="button" onClick={() => void workflowRef.current?.reconcile()} disabled={busy}>
-            Đối chiếu với máy chủ
-          </button>
-        )}
-      </section>
-    </>
+            <SubmitBar
+              phase={state.phase}
+              error={state.error}
+              dirty={dirty}
+              busy={busy}
+              drawing={drawing}
+              canEdit={viewerEditable}
+              onSave={() => void workflowRef.current?.save()}
+              onSubmit={() => void workflowRef.current?.submit()}
+            />
+
+            {(state.phase === 'error' || state.phase === 'conflict') && (
+              <button
+                type="button"
+                className="button-secondary"
+                onClick={() => void workflowRef.current?.reconcile()}
+                disabled={busy}
+              >
+                Đối chiếu với máy chủ
+              </button>
+            )}
+          </section>
+        </aside>
+      </div>
+    </div>
   )
 }
 
@@ -304,7 +323,7 @@ function FinalReadPane({
   const [aiState, setAiState] = useState<AISessionState>({ projection: null, pending: true, error: null })
   const [drawing, setDrawing] = useState(false)
   const [blocked, setBlocked] = useState<string | null>(null)
-  const [measureArm, setMeasureArm] = useState(0)
+  const [measureArm, setMeasureArm] = useState<number | undefined>(undefined)
 
   const mountedRef = useRef(true)
   const workflowRef = useRef<FinalWorkflow | null>(null)
@@ -450,7 +469,7 @@ function FinalReadPane({
             {loadError}
           </p>
         )}
-        <button type="button" onClick={onReload}>
+        <button type="button" className="button-secondary" onClick={onReload}>
           Thử lại
         </button>
       </section>
@@ -480,79 +499,98 @@ function FinalReadPane({
     }
     sessionRef.current?.beginLinkedDraw(candidateId)
     void sessionRef.current?.focusCandidate(candidateId)
-    setMeasureArm((value) => value + 1)
+    setMeasureArm((value) => (value ?? 0) + 1)
   }
 
 
   return (
-    <>
-      <Viewer
-        caseMetadata={caseMetadata}
-        openedAt={openedAt}
-        onRetry={onReload}
-        armMeasure={measureArm}
-        finalRead={{
-          draft: state.draft,
-          editable: viewerEditable,
-          sessionEpoch: state.snapshotEpoch,
-          defaultOrigin: 'reader_after_ai',
-          candidates,
-          onDraftChange: (draft: FinalDraftMark[]) => workflowRef.current?.replaceDraft(draft),
-          onDrawingChange: setDrawing,
-          onError: (message) => setBlocked(message),
-          onSession: (session) => {
-            sessionRef.current = session
-          },
-        }}
-      />
+    <div className="case-workspace">
+      <CaseHeader caseMetadata={caseMetadata} stage={completed ? 'completed' : 'review'} />
 
-      <AiPanel
-        state={aiState}
-        decisions={state.decisions}
-        linkedCandidates={linked}
-        canDecide={rowEditable}
-        onFocus={focusCandidate}
-        onAccept={acceptCandidate}
-        onDismiss={(candidateId, reason) => workflowRef.current?.dismiss(candidateId, reason)}
-        onRetry={() => aiSessionRef.current?.retry()}
-      />
+      <div className="case-grid">
+        <div className="case-viewer">
+          <Viewer
+            caseMetadata={caseMetadata}
+            openedAt={openedAt}
+            onRetry={onReload}
+            armMeasure={measureArm}
+            finalRead={{
+              draft: state.draft,
+              editable: viewerEditable,
+              sessionEpoch: state.snapshotEpoch,
+              defaultOrigin: 'reader_after_ai',
+              candidates,
+              onDraftChange: (draft: FinalDraftMark[]) => workflowRef.current?.replaceDraft(draft),
+              onDrawingChange: setDrawing,
+              onError: (message) => setBlocked(message),
+              onSession: (session) => {
+                sessionRef.current = session
+              },
+            }}
+          />
+        </div>
 
-      <section className="panel" aria-labelledby="final-heading">
-        <h2 id="final-heading">{completed ? 'Bản cuối (đã hoàn tất, chỉ đọc)' : 'Bản cuối sau khóa'}</h2>
-        <p className="notice">
-          Tọa độ LPS mm; bản cuối chỉ đọc sau khi hoàn tất ca. Bản đọc đầu #{initial.id} đã khóa.
-        </p>
+        <aside className="case-sidebar" aria-label="Gợi ý AI và bản cuối">
+          <AiPanel
+            state={aiState}
+            decisions={state.decisions}
+            linkedCandidates={linked}
+            canDecide={!completed && rowEditable}
+            onFocus={focusCandidate}
+            onAccept={acceptCandidate}
+            onDismiss={(candidateId, reason) => workflowRef.current?.dismiss(candidateId, reason)}
+            onRetry={() => aiSessionRef.current?.retry()}
+          />
 
-        {blocked !== null && (
-          <p className="error" role="alert">
-            {blocked}
-          </p>
-        )}
+          <section className="panel read-panel" aria-labelledby="final-heading">
+            <div className="panel-heading">
+              <div>
+                <h2 id="final-heading">{completed ? 'Bản cuối (đã hoàn tất)' : 'Bản cuối sau khóa'}</h2>
+                <p className="panel-sub">
+                  Tọa độ LPS mm; bản đọc đầu #{initial.id} đã khóa.
+                  {completed ? ' Bản cuối chỉ đọc.' : ''}
+                </p>
+              </div>
+              <span className="count-chip">{state.draft.length} dấu</span>
+            </div>
 
-        <MarkList
-          draft={state.draft}
-          editable={rowEditable}
-          onFocus={(localId) => void sessionRef.current?.focus(localId)}
-          onRemove={(localId) => sessionRef.current?.remove(localId)}
-        />
+            {blocked !== null && (
+              <p className="error" role="alert">
+                {blocked}
+              </p>
+            )}
 
-        <FinalizeBar
-          phase={state.phase}
-          error={state.error}
-          dirty={dirty}
-          busy={busy}
-          drawing={drawing}
-          canEdit={viewerEditable}
-          onSave={() => void workflowRef.current?.save()}
-          onFinalize={() => void workflowRef.current?.finalize()}
-        />
+            <MarkList
+              draft={state.draft}
+              editable={rowEditable}
+              onFocus={(localId) => void sessionRef.current?.focus(localId)}
+              onRemove={(localId) => sessionRef.current?.remove(localId)}
+            />
 
-        {(state.phase === 'error' || state.phase === 'conflict') && (
-          <button type="button" onClick={() => void workflowRef.current?.reconcile()} disabled={busy}>
-            Đối chiếu với máy chủ
-          </button>
-        )}
-      </section>
-    </>
+            <FinalizeBar
+              phase={state.phase}
+              error={state.error}
+              dirty={dirty}
+              busy={busy}
+              drawing={drawing}
+              canEdit={viewerEditable}
+              onSave={() => void workflowRef.current?.save()}
+              onFinalize={() => void workflowRef.current?.finalize()}
+            />
+
+            {(state.phase === 'error' || state.phase === 'conflict') && (
+              <button
+                type="button"
+                className="button-secondary"
+                onClick={() => void workflowRef.current?.reconcile()}
+                disabled={busy}
+              >
+                Đối chiếu với máy chủ
+              </button>
+            )}
+          </section>
+        </aside>
+      </div>
+    </div>
   )
 }

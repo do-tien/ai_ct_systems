@@ -44,6 +44,7 @@ func NewRouter(
 	router.Post("/api/auth/logout", auth.logout)
 
 	initialRead := &initialReadHandler{service: initialReadService}
+	router.Get("/api/cases", initialRead.listCases)
 	router.Get("/api/cases/{id}", initialRead.getCase)
 	router.Get("/api/cases/{id}/reads/initial", initialRead.getInitial)
 	router.Put("/api/cases/{id}/reads/initial/marks", initialRead.putMarks)

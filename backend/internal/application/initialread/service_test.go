@@ -16,6 +16,12 @@ type recordingStore struct {
 	caseResult Case
 	caseErr    error
 
+	listResult []Case
+	listErr    error
+	listCalls  int
+	listUserID int64
+	listLimit  int
+
 	readResult Read
 	readErr    error
 	readCalls  int
@@ -33,6 +39,13 @@ type recordingStore struct {
 
 func (s *recordingStore) GetCase(context.Context, int64) (Case, error) {
 	return s.caseResult, s.caseErr
+}
+
+func (s *recordingStore) ListCases(_ context.Context, userID int64, limit int) ([]Case, error) {
+	s.listCalls++
+	s.listUserID = userID
+	s.listLimit = limit
+	return s.listResult, s.listErr
 }
 
 func (s *recordingStore) GetOrCreateInitial(_ context.Context, _ int64, userID int64) (Read, error) {
@@ -275,6 +288,58 @@ func TestReplaceRejectsEntireInvalidList(t *testing.T) {
 	}
 	if store.replaceCalls != 0 {
 		t.Fatalf("store replaced %d times, want 0", store.replaceCalls)
+	}
+}
+
+func TestListCasesForwardsUserAndClampsLimit(t *testing.T) {
+	store := &recordingStore{listResult: []Case{{ID: 5}}}
+	service := NewService(store)
+
+	cases, err := service.ListCases(context.Background(), 17, 500)
+	if err != nil {
+		t.Fatalf("ListCases: %v", err)
+	}
+	if len(cases) != 1 || cases[0].ID != 5 {
+		t.Fatalf("cases = %+v", cases)
+	}
+	if store.listUserID != 17 {
+		t.Fatalf("user = %d, want 17", store.listUserID)
+	}
+	if store.listLimit != MaxCaseList {
+		t.Fatalf("limit = %d, want %d", store.listLimit, MaxCaseList)
+	}
+
+	if _, err := service.ListCases(context.Background(), 17, 7); err != nil {
+		t.Fatalf("ListCases small limit: %v", err)
+	}
+	if store.listLimit != 7 {
+		t.Fatalf("limit = %d, want 7", store.listLimit)
+	}
+
+	if _, err := service.ListCases(context.Background(), 17, 0); err != nil {
+		t.Fatalf("ListCases zero limit: %v", err)
+	}
+	if store.listLimit != MaxCaseList {
+		t.Fatalf("limit = %d, want %d", store.listLimit, MaxCaseList)
+	}
+}
+
+func TestListCasesRejectsInvalidUser(t *testing.T) {
+	for _, userID := range []int64{0, -1} {
+		store := &recordingStore{}
+		if _, err := NewService(store).ListCases(context.Background(), userID, 10); !errors.Is(err, ErrInvalid) {
+			t.Fatalf("user %d error = %v, want ErrInvalid", userID, err)
+		}
+		if store.listCalls != 0 {
+			t.Fatalf("invalid user %d reached the store", userID)
+		}
+	}
+}
+
+func TestListCasesPropagatesDependencyFailure(t *testing.T) {
+	store := &recordingStore{listErr: fail(ErrDependency, "storage")}
+	if _, err := NewService(store).ListCases(context.Background(), 17, 10); !errors.Is(err, ErrDependency) {
+		t.Fatalf("error = %v, want ErrDependency", err)
 	}
 }
 

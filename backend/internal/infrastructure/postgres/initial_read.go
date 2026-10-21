@@ -41,6 +41,24 @@ func (s *InitialReadStore) GetCase(ctx context.Context, caseID int64) (initialre
 	return toCase(row), nil
 }
 
+// ListCases returns the authenticated reader's cases, newest first. Ownership
+// follows the initial read; a confirmed but unopened case belongs to the user
+// who imported it. The projection is the same allowlist as GetCase.
+func (s *InitialReadStore) ListCases(ctx context.Context, userID int64, limit int) ([]initialread.Case, error) {
+	rows, err := lc1db.New(s.pool).ListCasesByReader(ctx, lc1db.ListCasesByReaderParams{
+		UserID:   userID,
+		RowLimit: int32(limit),
+	})
+	if err != nil {
+		return nil, classifyInitialRead(ctx, err)
+	}
+	cases := make([]initialread.Case, 0, len(rows))
+	for _, row := range rows {
+		cases = append(cases, toCase(row))
+	}
+	return cases, nil
+}
+
 // GetOrCreateInitial returns the authenticated owner's initial read, creating an
 // empty draft only when the case is still awaiting its read. A later-state case
 // without a read is a conflict, never a fabricated draft, and a read owned by
