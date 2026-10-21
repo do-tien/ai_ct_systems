@@ -34,6 +34,8 @@ func doHealthRequest(postgresErr, orthancErr error) (int, http.Header, string) {
 		nil,                    // unused final-read dependency for health tests
 		nil,                    // unused upload dependency for health tests
 		http.NotFoundHandler(), // unused DICOMweb dependency for health tests
+		newFakeAuth(),
+		false,
 	)
 	recorder := httptest.NewRecorder()
 	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/healthz", nil))

@@ -31,10 +31,10 @@ var uploadIDPattern = regexp.MustCompile(`^[0-9a-zA-Z_-]{1,64}$`)
 // uploadService is the consumer-owned port the upload endpoints need. It is
 // satisfied by *caseimport.Service.
 type uploadService interface {
-	Prepare(ctx context.Context, files []caseimport.StagedFile, skippedFiles int) (caseimport.Session, error)
-	Confirm(ctx context.Context, uploadID, seriesKey string) (caseimport.Result, error)
-	Get(ctx context.Context, uploadID string) (caseimport.Session, error)
-	Discard(ctx context.Context, uploadID string) error
+	Prepare(ctx context.Context, files []caseimport.StagedFile, skippedFiles int, userID int64) (caseimport.Session, error)
+	Confirm(ctx context.Context, uploadID, seriesKey string, userID int64) (caseimport.Result, error)
+	Get(ctx context.Context, uploadID string, userID int64) (caseimport.Session, error)
+	Discard(ctx context.Context, uploadID string, userID int64) error
 }
 
 // uploadHandler serves the four upload endpoints. It is a self-dispatching
@@ -88,6 +88,10 @@ func (h *uploadHandler) create(w http.ResponseWriter, r *http.Request) {
 	if !h.checkOrigin(w, r) {
 		return
 	}
+	principal, ok := requirePrincipal(w, r)
+	if !ok {
+		return
+	}
 	if !isMultipart(r) {
 		h.writeError(w, http.StatusUnsupportedMediaType, "UNSUPPORTED_UPLOAD_FORMAT")
 		return
@@ -111,7 +115,7 @@ func (h *uploadHandler) create(w http.ResponseWriter, r *http.Request) {
 	for _, file := range staged {
 		files = append(files, caseimport.StagedFile{Path: file.Path, Size: file.Size})
 	}
-	session, err := h.service.Prepare(r.Context(), files, workspace.SkippedFiles())
+	session, err := h.service.Prepare(r.Context(), files, workspace.SkippedFiles(), principal.UserID)
 	if err != nil {
 		h.writeServiceError(w, r, err)
 		return
@@ -122,11 +126,15 @@ func (h *uploadHandler) create(w http.ResponseWriter, r *http.Request) {
 // get returns one session's redacted view so a client can reconcile a lost
 // confirmation without resending any DICOM.
 func (h *uploadHandler) get(w http.ResponseWriter, r *http.Request, id string) {
+	principal, ok := requirePrincipal(w, r)
+	if !ok {
+		return
+	}
 	if !validUploadID(id) {
 		h.writeError(w, http.StatusNotFound, "UPLOAD_NOT_FOUND")
 		return
 	}
-	session, err := h.service.Get(r.Context(), id)
+	session, err := h.service.Get(r.Context(), id, principal.UserID)
 	if err != nil {
 		h.writeServiceError(w, r, err)
 		return
@@ -138,6 +146,10 @@ func (h *uploadHandler) get(w http.ResponseWriter, r *http.Request, id string) {
 // existing one on a repeat.
 func (h *uploadHandler) confirm(w http.ResponseWriter, r *http.Request, id string) {
 	if !h.checkOrigin(w, r) {
+		return
+	}
+	principal, ok := requirePrincipal(w, r)
+	if !ok {
 		return
 	}
 	if !validUploadID(id) {
@@ -159,7 +171,7 @@ func (h *uploadHandler) confirm(w http.ResponseWriter, r *http.Request, id strin
 		return
 	}
 
-	result, err := h.service.Confirm(r.Context(), id, payload.SeriesID)
+	result, err := h.service.Confirm(r.Context(), id, payload.SeriesID, principal.UserID)
 	if err != nil {
 		h.writeServiceError(w, r, err)
 		return
@@ -177,11 +189,15 @@ func (h *uploadHandler) discard(w http.ResponseWriter, r *http.Request, id strin
 	if !h.checkOrigin(w, r) {
 		return
 	}
+	principal, ok := requirePrincipal(w, r)
+	if !ok {
+		return
+	}
 	if !validUploadID(id) {
 		h.writeError(w, http.StatusNotFound, "UPLOAD_NOT_FOUND")
 		return
 	}
-	if err := h.service.Discard(r.Context(), id); err != nil {
+	if err := h.service.Discard(r.Context(), id, principal.UserID); err != nil {
 		h.writeServiceError(w, r, err)
 		return
 	}
@@ -239,6 +255,8 @@ func (h *uploadHandler) writeServiceError(w http.ResponseWriter, r *http.Request
 		return
 	case errors.Is(err, caseimport.ErrNotFound):
 		h.writeError(w, http.StatusNotFound, "UPLOAD_NOT_FOUND")
+	case errors.Is(err, caseimport.ErrForbidden):
+		h.writeError(w, http.StatusForbidden, "UPLOAD_FORBIDDEN")
 	case errors.Is(err, caseimport.ErrExpired):
 		h.writeError(w, http.StatusConflict, "UPLOAD_EXPIRED")
 	case errors.Is(err, caseimport.ErrAlreadyConfirmed):
@@ -330,6 +348,7 @@ var uploadErrorMessages = map[string]string{
 	"INVALID_UPLOAD":            "Bộ dữ liệu tải lên không hợp lệ.",
 	"ORIGIN_NOT_ALLOWED":        "Yêu cầu không xuất phát từ trang hợp lệ.",
 	"UPLOAD_NOT_FOUND":          "Không tìm thấy phiên tải lên này.",
+	"UPLOAD_FORBIDDEN":          "Phiên tải lên này thuộc về người dùng khác.",
 	"UPLOAD_EXPIRED":            "Phiên tải lên đã hết hạn; cần tải lại dữ liệu.",
 	"UPLOAD_ALREADY_CONFIRMED":  "Phiên tải lên đã được xác nhận với series khác.",
 	"UPLOAD_TOO_LARGE":          "Bộ dữ liệu tải lên vượt quá giới hạn cho phép.",

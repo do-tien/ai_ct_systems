@@ -19,6 +19,13 @@ type AiJob struct {
 	FinishedAt pgtype.Timestamptz
 }
 
+type AuthSession struct {
+	TokenDigest []byte
+	UserID      int64
+	CreatedAt   pgtype.Timestamptz
+	ExpiresAt   pgtype.Timestamptz
+}
+
 type CandidateDecision struct {
 	ReadID        int64
 	CandidateID   string
@@ -40,12 +47,13 @@ type Case struct {
 }
 
 type Event struct {
-	ID     int64
-	CaseID pgtype.Int8
-	Actor  string
-	Action string
-	Detail []byte
-	At     pgtype.Timestamptz
+	ID          int64
+	CaseID      pgtype.Int8
+	Actor       string
+	Action      string
+	Detail      []byte
+	At          pgtype.Timestamptz
+	ActorUserID pgtype.Int8
 }
 
 type Mark struct {
@@ -62,10 +70,20 @@ type Mark struct {
 }
 
 type Read struct {
-	ID        int64
-	CaseID    int64
-	Kind      string
-	Reader    string
-	LockedAt  pgtype.Timestamptz
-	CreatedAt pgtype.Timestamptz
+	ID           int64
+	CaseID       int64
+	Kind         string
+	LockedAt     pgtype.Timestamptz
+	CreatedAt    pgtype.Timestamptz
+	ReaderUserID int64
+}
+
+type User struct {
+	ID          int64
+	DisplayName string
+	PinLookup   []byte
+	PinHash     string
+	DisabledAt  pgtype.Timestamptz
+	CreatedAt   pgtype.Timestamptz
+	UpdatedAt   pgtype.Timestamptz
 }

@@ -80,6 +80,15 @@ export function parseInitialMarks(payload: unknown): InitialMark[] {
   return parseMarkArray(payload, 'marks response')
 }
 
+function parseReaderName(value: unknown): string {
+  // The server now returns the authenticated owner's display name. Preserve it
+  // byte-for-byte; only an empty/blank/non-string value is malformed.
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    throw new InitialApiError('initial read reader is not a display name')
+  }
+  return value
+}
+
 export function parseInitialRead(payload: unknown, caseId: number): InitialRead {
   if (!isRecord(payload)) {
     throw new InitialApiError('initial read response is not an object')
@@ -90,9 +99,10 @@ export function parseInitialRead(payload: unknown, caseId: number): InitialRead 
   if (payload.case_id !== caseId) {
     throw new InitialApiError('initial read does not belong to the requested case')
   }
-  if (payload.kind !== 'initial' || payload.reader !== 'reader') {
+  if (payload.kind !== 'initial') {
     throw new InitialApiError('initial read identity is unexpected')
   }
+  const reader = parseReaderName(payload.reader)
   const lockedAt = payload.locked_at
   if (lockedAt !== null && typeof lockedAt !== 'string') {
     throw new InitialApiError('initial read locked_at is not a timestamp or null')
@@ -101,7 +111,7 @@ export function parseInitialRead(payload: unknown, caseId: number): InitialRead 
     id: payload.id as number,
     case_id: caseId,
     kind: 'initial',
-    reader: 'reader',
+    reader,
     locked_at: lockedAt,
     marks: parseMarkArray(payload.marks, 'initial read marks'),
   }

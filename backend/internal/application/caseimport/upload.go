@@ -89,6 +89,7 @@ type seriesState struct {
 type sessionState struct {
 	mu            sync.Mutex
 	id            string
+	ownerUserID   int64
 	expiresAt     time.Time
 	skipped       int
 	series        []seriesState

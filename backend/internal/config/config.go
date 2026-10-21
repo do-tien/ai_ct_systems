@@ -3,6 +3,7 @@
 package config
 
 import (
+	"encoding/base64"
 	"fmt"
 	"net/url"
 	"os"
@@ -35,6 +36,8 @@ type Config struct {
 	AITimeout        time.Duration
 	AIDevice         string
 	UploadDir        string
+	AuthPinPepper    string
+	AuthCookieSecure bool
 }
 
 // LoadPostgres reads only the POSTGRES_* variables needed to reach the
@@ -77,6 +80,53 @@ func LoadPostgres() (postgres.Settings, error) {
 	}, nil
 }
 
+// AuthSettings holds the validated authentication configuration needed by the
+// server and the user-administration CLI: the PostgreSQL connection and the
+// PIN pepper. It deliberately excludes Orthanc, AI, upload and HTTP settings.
+type AuthSettings struct {
+	Postgres  postgres.Settings
+	PINPepper string
+}
+
+// LoadAuth reads only the POSTGRES_* and AUTH_PIN_PEPPER variables. Errors name
+// the offending variable but never include its value.
+func LoadAuth() (AuthSettings, error) {
+	settings, err := LoadPostgres()
+	if err != nil {
+		return AuthSettings{}, err
+	}
+	pepper, err := required("AUTH_PIN_PEPPER")
+	if err != nil {
+		return AuthSettings{}, err
+	}
+	if err := validatePINPepper(pepper); err != nil {
+		return AuthSettings{}, err
+	}
+	return AuthSettings{Postgres: settings, PINPepper: pepper}, nil
+}
+
+// validatePINPepper requires unpadded base64url that decodes to exactly the
+// 32-byte key the credential primitive expects. It never echoes the value.
+func validatePINPepper(value string) error {
+	decoded, err := base64.RawURLEncoding.DecodeString(value)
+	if err != nil || len(decoded) != 32 {
+		return fmt.Errorf("AUTH_PIN_PEPPER must be unpadded base64url encoding exactly 32 bytes")
+	}
+	return nil
+}
+
+// parseAuthCookieSecure accepts only "true" or "false"; absence means false.
+func parseAuthCookieSecure() (bool, error) {
+	switch value := os.Getenv("AUTH_COOKIE_SECURE"); value {
+	case "", "false":
+		return false, nil
+	case "true":
+		return true, nil
+	default:
+		return false, fmt.Errorf("AUTH_COOKIE_SECURE must be true or false")
+	}
+}
+
 // OrthancSettings holds the validated Orthanc connection settings.
 type OrthancSettings struct {
 	URL      string
@@ -116,15 +166,19 @@ func LoadOrthanc() (OrthancSettings, error) {
 func Load() (Config, error) {
 	cfg := Config{HTTPAddr: envOrDefault("HTTP_ADDR", defaultHTTPAddr)}
 
-	settings, err := LoadPostgres()
+	settings, err := LoadAuth()
 	if err != nil {
 		return Config{}, err
 	}
-	cfg.PostgresHost = settings.Host
-	cfg.PostgresPort = settings.Port
-	cfg.PostgresDB = settings.Database
-	cfg.PostgresUser = settings.User
-	cfg.PostgresPassword = settings.Password
+	cfg.PostgresHost = settings.Postgres.Host
+	cfg.PostgresPort = settings.Postgres.Port
+	cfg.PostgresDB = settings.Postgres.Database
+	cfg.PostgresUser = settings.Postgres.User
+	cfg.PostgresPassword = settings.Postgres.Password
+	cfg.AuthPinPepper = settings.PINPepper
+	if cfg.AuthCookieSecure, err = parseAuthCookieSecure(); err != nil {
+		return Config{}, err
+	}
 
 	orthancSettings, err := LoadOrthanc()
 	if err != nil {

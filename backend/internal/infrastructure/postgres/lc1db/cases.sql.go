@@ -95,6 +95,29 @@ func (q *Queries) GetCase(ctx context.Context, id int64) (Case, error) {
 	return i, err
 }
 
+const getCaseBySeriesUID = `-- name: GetCaseBySeriesUID :one
+SELECT id, source, study_instance_uid, series_instance_uid, orthanc_series_id, frame_of_reference_uid, status, finalized_at, created_at
+FROM cases
+WHERE series_instance_uid = $1
+`
+
+func (q *Queries) GetCaseBySeriesUID(ctx context.Context, seriesInstanceUid string) (Case, error) {
+	row := q.db.QueryRow(ctx, getCaseBySeriesUID, seriesInstanceUid)
+	var i Case
+	err := row.Scan(
+		&i.ID,
+		&i.Source,
+		&i.StudyInstanceUid,
+		&i.SeriesInstanceUid,
+		&i.OrthancSeriesID,
+		&i.FrameOfReferenceUid,
+		&i.Status,
+		&i.FinalizedAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getCaseForUpdate = `-- name: GetCaseForUpdate :one
 SELECT id, source, study_instance_uid, series_instance_uid, orthanc_series_id, frame_of_reference_uid, status, finalized_at, created_at
 FROM cases

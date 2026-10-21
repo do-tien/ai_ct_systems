@@ -4,6 +4,7 @@
 // server message, path or upstream body is ever surfaced.
 
 import { isFiniteNumber, isRecord } from '../reads/http.ts'
+import { authenticatedFetch, notifyAuthRequired } from '../auth/session.ts'
 import type { UploadCaseResult, UploadSeriesOption, UploadSession } from './types.ts'
 
 // The transfer budget the backend also enforces end to end. A real CT batch is
@@ -174,7 +175,7 @@ async function requestUploadJson(
     if (options.body !== undefined) {
       headers['Content-Type'] = 'application/json'
     }
-    response = await fetch(path, {
+    response = await authenticatedFetch(path, {
       method: options.method,
       headers,
       body: options.body,
@@ -273,6 +274,9 @@ export function uploadFiles(transfer: UploadTransfer): Promise<UploadSession> {
     })
     request.addEventListener('load', () => {
       settle()
+      if (request.status === 401) {
+        notifyAuthRequired()
+      }
       const text = typeof request.response === 'string' ? request.response : null
       if (request.status < 200 || request.status >= 300) {
         const code = errorCodeFrom(text)

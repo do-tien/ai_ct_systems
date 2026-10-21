@@ -2,11 +2,16 @@ package postgres_test
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
 
+	"nodule-reader/backend/internal/application/auth"
+	"nodule-reader/backend/internal/infrastructure/postgres"
 	"nodule-reader/backend/internal/infrastructure/postgres/lc1db"
 )
 
@@ -223,4 +228,192 @@ func TestLC1StoragePrivileges(t *testing.T) {
 
 func quoteIdent(name string) string {
 	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
+}
+
+// TestLC1StorageAuthRuntimeGrants proves the documented runtime grants are
+// sufficient for every authentication query the server and userctl execute.
+// Removing the users/auth_sessions grants makes this test fail with 42501.
+func TestLC1StorageAuthRuntimeGrants(t *testing.T) {
+	h := newStorageHarness(t)
+	h.migrate(t)
+	h.grantRuntime(t)
+	owner := h.owner(t)
+	runtime := h.runtime(t)
+	ctx := context.Background()
+	oq := lc1db.New(owner)
+	rq := lc1db.New(runtime)
+
+	pool, err := pgxpool.New(ctx, h.runtimeDSN)
+	if err != nil {
+		t.Fatalf("runtime pool: %v", err)
+	}
+	t.Cleanup(pool.Close)
+	store := postgres.NewAuthStore(pool)
+
+	caseRow := createCase(t, oq, "1.2.3.4.42")
+	initialRead := createRead(t, oq, caseRow.ID, "initial")
+
+	t.Run("read_queries_join_users_as_runtime", func(t *testing.T) {
+		got, err := rq.GetRead(ctx, lc1db.GetReadParams{CaseID: caseRow.ID, Kind: "initial"})
+		if err != nil {
+			t.Fatalf("runtime GetRead: %v", err)
+		}
+		if got.ID != initialRead.ID || got.ReaderDisplayName == "" {
+			t.Fatalf("GetRead = %+v", got)
+		}
+		locked, err := rq.GetReadForUpdate(ctx, lc1db.GetReadForUpdateParams{CaseID: caseRow.ID, Kind: "initial"})
+		if err != nil {
+			t.Fatalf("runtime GetReadForUpdate: %v", err)
+		}
+		if locked.ID != initialRead.ID || locked.ReaderDisplayName == "" {
+			t.Fatalf("GetReadForUpdate = %+v", locked)
+		}
+	})
+
+	t.Run("user_administration_as_runtime", func(t *testing.T) {
+		alice, err := store.CreateUser(ctx, "Runtime Alice", randomBytes(t, 32), "synthetic-alice")
+		if err != nil {
+			t.Fatalf("CreateUser: %v", err)
+		}
+		if alice.ID == 0 || alice.DisplayName != "Runtime Alice" {
+			t.Fatalf("created user = %+v", alice)
+		}
+		users, err := store.ListUsers(ctx)
+		if err != nil {
+			t.Fatalf("ListUsers: %v", err)
+		}
+		if len(users) == 0 {
+			t.Fatal("ListUsers returned no users")
+		}
+
+		bobLookup := randomBytes(t, 32)
+		bob, err := store.CreateUser(ctx, "Runtime Bob", bobLookup, "synthetic-before")
+		if err != nil {
+			t.Fatalf("CreateUser bob: %v", err)
+		}
+		found, encoded, err := store.FindActiveUserByPINLookup(ctx, bobLookup)
+		if err != nil {
+			t.Fatalf("FindActiveUserByPINLookup: %v", err)
+		}
+		if found.ID != bob.ID || encoded != "synthetic-before" {
+			t.Fatalf("lookup = %+v, %q", found, encoded)
+		}
+		if _, _, err := store.FindActiveUserByPINLookup(ctx, randomBytes(t, 32)); !errors.Is(err, auth.ErrUserNotFound) {
+			t.Fatalf("missing lookup error = %v, want ErrUserNotFound", err)
+		}
+
+		bobDigest := randomBytes(t, 32)
+		if err := store.CreateSession(ctx, bobDigest, bob.ID, time.Now().Add(time.Hour)); err != nil {
+			t.Fatalf("CreateSession bob: %v", err)
+		}
+		if err := store.RotatePIN(ctx, bob.ID, randomBytes(t, 32), "synthetic-after"); err != nil {
+			t.Fatalf("RotatePIN: %v", err)
+		}
+		if _, _, err := store.FindActiveUserByPINLookup(ctx, bobLookup); !errors.Is(err, auth.ErrUserNotFound) {
+			t.Fatalf("rotated-away lookup error = %v, want ErrUserNotFound", err)
+		}
+		if _, err := store.FindSession(ctx, bobDigest, time.Now()); !errors.Is(err, auth.ErrSessionNotFound) {
+			t.Fatalf("session after rotate error = %v, want ErrSessionNotFound", err)
+		}
+
+		// DeleteSessionsForUser is also reachable directly (session pruning).
+		otherDigest := randomBytes(t, 32)
+		if err := store.CreateSession(ctx, otherDigest, bob.ID, time.Now().Add(time.Hour)); err != nil {
+			t.Fatalf("CreateSession bob 2: %v", err)
+		}
+		if err := rq.DeleteSessionsForUser(ctx, bob.ID); err != nil {
+			t.Fatalf("DeleteSessionsForUser: %v", err)
+		}
+		var remaining int
+		if err := runtime.QueryRow(ctx, `SELECT count(*) FROM auth_sessions WHERE user_id = $1`, bob.ID).Scan(&remaining); err != nil {
+			t.Fatalf("count sessions: %v", err)
+		}
+		if remaining != 0 {
+			t.Fatalf("sessions for bob = %d, want 0", remaining)
+		}
+	})
+
+	t.Run("sessions_as_runtime", func(t *testing.T) {
+		alice, err := store.CreateUser(ctx, "Runtime Carol", randomBytes(t, 32), "synthetic-carol")
+		if err != nil {
+			t.Fatalf("CreateUser: %v", err)
+		}
+		digest := randomBytes(t, 32)
+		expiresAt := time.Now().Add(time.Hour).Truncate(time.Microsecond)
+		if err := store.CreateSession(ctx, digest, alice.ID, expiresAt); err != nil {
+			t.Fatalf("CreateSession: %v", err)
+		}
+		session, err := store.FindSession(ctx, digest, time.Now())
+		if err != nil {
+			t.Fatalf("FindSession: %v", err)
+		}
+		if session.User.ID != alice.ID || session.User.DisplayName != alice.DisplayName {
+			t.Fatalf("session = %+v", session)
+		}
+		if !session.ExpiresAt.Equal(expiresAt) {
+			t.Fatalf("expires_at = %v, want %v", session.ExpiresAt, expiresAt)
+		}
+		if err := store.DeleteSession(ctx, digest); err != nil {
+			t.Fatalf("DeleteSession: %v", err)
+		}
+		if err := store.DeleteSession(ctx, digest); err != nil {
+			t.Fatalf("DeleteSession repeat: %v", err)
+		}
+		if _, err := store.FindSession(ctx, digest, time.Now()); !errors.Is(err, auth.ErrSessionNotFound) {
+			t.Fatalf("deleted session error = %v, want ErrSessionNotFound", err)
+		}
+
+		expiredDigest := randomBytes(t, 32)
+		// The schema requires expires_at > created_at, so an already-expired
+		// row must be seeded with a backdated creation time.
+		if _, err := owner.Exec(ctx,
+			`INSERT INTO auth_sessions (token_digest, user_id, created_at, expires_at)
+			 VALUES ($1, $2, now() - interval '2 hours', now() - interval '1 hour')`,
+			expiredDigest, alice.ID); err != nil {
+			t.Fatalf("seed expired session: %v", err)
+		}
+		if err := store.DeleteExpiredSessions(ctx, time.Now()); err != nil {
+			t.Fatalf("DeleteExpiredSessions: %v", err)
+		}
+		var remaining int
+		if err := runtime.QueryRow(ctx, `SELECT count(*) FROM auth_sessions WHERE token_digest = $1`, expiredDigest).Scan(&remaining); err != nil {
+			t.Fatalf("count expired sessions: %v", err)
+		}
+		if remaining != 0 {
+			t.Fatalf("expired sessions remaining = %d, want 0", remaining)
+		}
+	})
+
+	t.Run("disable_user_as_runtime", func(t *testing.T) {
+		daveLookup := randomBytes(t, 32)
+		dave, err := store.CreateUser(ctx, "Runtime Dave", daveLookup, "synthetic-dave")
+		if err != nil {
+			t.Fatalf("CreateUser: %v", err)
+		}
+		digest := randomBytes(t, 32)
+		if err := store.CreateSession(ctx, digest, dave.ID, time.Now().Add(time.Hour)); err != nil {
+			t.Fatalf("CreateSession: %v", err)
+		}
+		if err := store.RevokeUser(ctx, dave.ID); err != nil {
+			t.Fatalf("RevokeUser: %v", err)
+		}
+		if err := store.RevokeUser(ctx, dave.ID); err != nil {
+			t.Fatalf("RevokeUser repeat: %v", err)
+		}
+		if _, _, err := store.FindActiveUserByPINLookup(ctx, daveLookup); !errors.Is(err, auth.ErrUserNotFound) {
+			t.Fatalf("disabled lookup error = %v, want ErrUserNotFound", err)
+		}
+		if _, err := store.FindSession(ctx, digest, time.Now()); !errors.Is(err, auth.ErrSessionNotFound) {
+			t.Fatalf("disabled session error = %v, want ErrSessionNotFound", err)
+		}
+	})
+
+	// Users are never deleted by the application: DELETE stays ungranted, so a
+	// future code path that tries it fails loudly instead of silently widening
+	// the runtime boundary.
+	if _, err := runtime.Exec(ctx, `DELETE FROM users WHERE id = 1`); err == nil {
+		t.Fatal("runtime DELETE on users unexpectedly succeeded")
+	} else {
+		assertSQLState(t, err, "42501", "delete users")
+	}
 }

@@ -12,7 +12,6 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/pressly/goose/v3"
 
-	"nodule-reader/backend/internal/application/initialread"
 	"nodule-reader/backend/migrations"
 )
 
@@ -52,13 +51,14 @@ func seedCaseConn(t *testing.T, conn *pgx.Conn, seriesUID, status string) int64 
 	return caseID
 }
 
-// seedReadKind inserts one read of the given kind directly on a connection.
+// seedReadKind inserts one read of the given kind directly on a connection,
+// owned by the shared seeded reader.
 func seedReadKind(t *testing.T, conn *pgx.Conn, caseID int64, kind string) int64 {
 	t.Helper()
 	var readID int64
 	if err := conn.QueryRow(context.Background(),
-		`INSERT INTO reads (case_id, kind, reader) VALUES ($1, $2, $3) RETURNING id`,
-		caseID, kind, initialread.Reader).Scan(&readID); err != nil {
+		`INSERT INTO reads (case_id, kind, reader_user_id) VALUES ($1, $2, $3) RETURNING id`,
+		caseID, kind, readerUserID(t, conn)).Scan(&readID); err != nil {
 		t.Fatalf("seed %s read: %v", kind, err)
 	}
 	return readID
@@ -121,6 +121,8 @@ func TestReadImmutability(t *testing.T) {
 
 	unlockedCase := seedCaseConn(t, runtime, "1.2.3.4.6.102", "awaiting_read")
 	unlockedRead := seedReadKind(t, runtime, unlockedCase, "initial")
+	readerID := readerUserID(t, owner)
+	otherReaderID := seedUser(t, owner, "Other reader")
 
 	denied := []struct {
 		label string
@@ -129,7 +131,7 @@ func TestReadImmutability(t *testing.T) {
 	}{
 		{"clear_locked_at", `UPDATE reads SET locked_at = NULL WHERE id = $1`, []any{lockedRead}},
 		{"replace_locked_at", `UPDATE reads SET locked_at = now() WHERE id = $1`, []any{lockedRead}},
-		{"change_reader", `UPDATE reads SET reader = 'other' WHERE id = $1`, []any{lockedRead}},
+		{"change_reader_user_id", `UPDATE reads SET reader_user_id = $2 WHERE id = $1`, []any{lockedRead, otherReaderID}},
 		{"change_kind", `UPDATE reads SET kind = 'final' WHERE id = $1`, []any{lockedRead}},
 		{"change_id", `UPDATE reads SET id = id + 1000 WHERE id = $1`, []any{lockedRead}},
 		{"change_created_at", `UPDATE reads SET created_at = now() WHERE id = $1`, []any{lockedRead}},
@@ -147,16 +149,23 @@ func TestReadImmutability(t *testing.T) {
 	unlockedIdentity := []struct {
 		label string
 		stmt  string
+		args  []any
 	}{
-		{"change_reader", `UPDATE reads SET reader = 'other' WHERE id = $1`},
-		{"change_kind", `UPDATE reads SET kind = 'final' WHERE id = $1`},
-		{"change_id", `UPDATE reads SET id = id + 1000 WHERE id = $1`},
-		{"change_case_id", `UPDATE reads SET case_id = case_id + 1 WHERE id = $1`},
-		{"change_created_at", `UPDATE reads SET created_at = now() WHERE id = $1`},
+		{"change_reader_user_id", `UPDATE reads SET reader_user_id = $2 WHERE id = $1`, []any{otherReaderID}},
+		{"change_kind", `UPDATE reads SET kind = 'final' WHERE id = $1`, nil},
+		{"change_id", `UPDATE reads SET id = id + 1000 WHERE id = $1`, nil},
+		{"change_case_id", `UPDATE reads SET case_id = case_id + 1 WHERE id = $1`, nil},
+		{"change_created_at", `UPDATE reads SET created_at = now() WHERE id = $1`, nil},
 	}
 	for _, tc := range unlockedIdentity {
 		t.Run("unlocked_identity_denied/"+tc.label, func(t *testing.T) {
-			_, err := owner.Exec(ctx, tc.stmt, unlockedRead)
+			args := tc.args
+			if args == nil {
+				args = []any{unlockedRead}
+			} else {
+				args = []any{unlockedRead, args[0]}
+			}
+			_, err := owner.Exec(ctx, tc.stmt, args...)
 			assertSQLStateConstraint(t, err, checkViolation, readImmutableConstraint, tc.label)
 		})
 	}
@@ -172,14 +181,14 @@ func TestReadImmutability(t *testing.T) {
 		t.Fatalf("case state reset: %v", err)
 	}
 	var (
-		reader string
-		locked *time.Time
+		storedReader int64
+		locked       *time.Time
 	)
-	if err := owner.QueryRow(ctx, `SELECT reader, locked_at FROM reads WHERE id = $1`, lockedRead).Scan(&reader, &locked); err != nil {
+	if err := owner.QueryRow(ctx, `SELECT reader_user_id, locked_at FROM reads WHERE id = $1`, lockedRead).Scan(&storedReader, &locked); err != nil {
 		t.Fatalf("locked read: %v", err)
 	}
-	if reader != initialread.Reader || locked == nil {
-		t.Fatalf("locked read mutated: reader=%q locked=%v", reader, locked)
+	if storedReader != readerID || locked == nil {
+		t.Fatalf("locked read mutated: reader=%d locked=%v", storedReader, locked)
 	}
 	if got := countMarksOn(t, owner, lockedRead); got != 1 {
 		t.Fatalf("locked marks = %d, want 1", got)
@@ -462,7 +471,7 @@ func TestLC1ReadImmutabilityMigration(t *testing.T) {
 	}
 	owner := h.owner(t)
 	caseID := seedCaseConn(t, owner, "1.2.3.4.6.500", "awaiting_read")
-	readID := seedReadKind(t, owner, caseID, "initial")
+	readID := seedReadKindWithReader(t, owner, caseID, "initial", "reader")
 	markID := insertMarkDirect(t, owner, readID, "survivor")
 	var eventID int64
 	if err := owner.QueryRow(ctx,
@@ -520,4 +529,17 @@ func TestLC1ReadImmutabilityMigration(t *testing.T) {
 	lockReadDirect(t, owner, readID)
 	_, err = owner.Exec(ctx, `DELETE FROM marks WHERE read_id = $1`, readID)
 	assertSQLStateConstraint(t, err, checkViolation, markLockedConstraint, "guard re-active after re-upgrade")
+}
+
+// seedReadKindWithReader inserts a read on a pre-00005 schema, where reads still
+// carried the text identity and no users table existed.
+func seedReadKindWithReader(t *testing.T, conn *pgx.Conn, caseID int64, kind, reader string) int64 {
+	t.Helper()
+	var readID int64
+	if err := conn.QueryRow(context.Background(),
+		`INSERT INTO reads (case_id, kind, reader) VALUES ($1, $2, $3) RETURNING id`,
+		caseID, kind, reader).Scan(&readID); err != nil {
+		t.Fatalf("seed %s read: %v", kind, err)
+	}
+	return readID
 }

@@ -19,26 +19,35 @@ type recordingStore struct {
 	reads     int
 	aiReads   int
 	finalizes int
+	userSeen  []int64
+	aiErr     error
 }
 
-func (s *recordingStore) GetAI(context.Context, int64, string) (AI, error) {
+func (s *recordingStore) GetAI(_ context.Context, _ int64, userID int64) (AI, error) {
 	s.aiReads++
+	s.userSeen = append(s.userSeen, userID)
+	if s.aiErr != nil {
+		return AI{}, s.aiErr
+	}
 	return AI{Status: AIQueued}, nil
 }
 
-func (s *recordingStore) GetFinal(context.Context, int64, string) (Read, error) {
+func (s *recordingStore) GetFinal(_ context.Context, _ int64, userID int64) (Read, error) {
 	s.reads++
+	s.userSeen = append(s.userSeen, userID)
 	return Read{}, nil
 }
 
-func (s *recordingStore) ReplaceFinal(_ context.Context, caseID int64, reader string, value Replacement) (Read, error) {
+func (s *recordingStore) ReplaceFinal(_ context.Context, caseID int64, userID int64, value Replacement) (Read, error) {
 	s.saves++
+	s.userSeen = append(s.userSeen, userID)
 	s.saved = value
-	return Read{ID: 1, CaseID: caseID, Kind: KindFinal, Reader: reader, Marks: value.Marks, CandidateDecisions: value.CandidateDecisions}, nil
+	return Read{ID: 1, CaseID: caseID, Kind: KindFinal, Marks: value.Marks, CandidateDecisions: value.CandidateDecisions}, nil
 }
 
-func (s *recordingStore) Finalize(context.Context, int64, string) (FinalizeResult, error) {
+func (s *recordingStore) Finalize(_ context.Context, _ int64, userID int64) (FinalizeResult, error) {
 	s.finalizes++
+	s.userSeen = append(s.userSeen, userID)
 	return FinalizeResult{}, nil
 }
 
@@ -255,7 +264,7 @@ func TestFinalReadValidation(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			store := &recordingStore{}
 			service := NewService(store)
-			_, err := service.ReplaceFinal(context.Background(), 1, test.value)
+			_, err := service.ReplaceFinal(context.Background(), 1, 1, test.value)
 			if test.wantErr {
 				if !errors.Is(err, ErrInvalid) {
 					t.Fatalf("error = %v, want ErrInvalid", err)
@@ -295,7 +304,7 @@ func TestFinalReadPreservesSubmittedValues(t *testing.T) {
 
 	// The candidate-derived mark needs an accepted decision, so this replacement
 	// is invalid: nothing may be saved.
-	if _, err := service.ReplaceFinal(context.Background(), 1, value); !errors.Is(err, ErrInvalid) {
+	if _, err := service.ReplaceFinal(context.Background(), 1, 1, value); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("error = %v, want ErrInvalid", err)
 	}
 	if store.saves != 0 {
@@ -306,7 +315,7 @@ func TestFinalReadPreservesSubmittedValues(t *testing.T) {
 		Marks:              []initialread.Mark{mark},
 		CandidateDecisions: []Decision{{CandidateID: "c1", Decision: DecisionDismissed, DismissReason: &reason}},
 	}
-	if _, err := service.ReplaceFinal(context.Background(), 1, valid); err != nil {
+	if _, err := service.ReplaceFinal(context.Background(), 1, 1, valid); err != nil {
 		t.Fatalf("error = %v, want nil", err)
 	}
 	if !reflect.DeepEqual(store.saved.Marks[0].P1MM, []float64{-102.3, 45.1, -180.5}) ||
@@ -484,28 +493,69 @@ func mustJSON(t *testing.T, value any) []byte {
 	return raw
 }
 
-// TestServiceDelegation proves the use case passes the fixed reader through and
-// keeps reads separate from writes.
-func TestServiceDelegation(t *testing.T) {
+// TestServiceForwardsUserID proves every use case passes the authenticated user
+// through and keeps reads separate from writes.
+func TestServiceForwardsUserID(t *testing.T) {
 	store := &recordingStore{}
 	service := NewService(store)
-	if _, err := service.GetAI(context.Background(), 4); err != nil {
+	if _, err := service.GetAI(context.Background(), 4, 15); err != nil {
 		t.Fatalf("GetAI: %v", err)
 	}
 	if store.aiReads != 1 {
 		t.Fatalf("aiReads = %d", store.aiReads)
 	}
-	if _, err := service.GetFinal(context.Background(), 4); err != nil {
+	if _, err := service.GetFinal(context.Background(), 4, 15); err != nil {
 		t.Fatalf("GetFinal: %v", err)
 	}
 	if store.reads != 1 {
 		t.Fatalf("reads = %d", store.reads)
 	}
-	result, err := service.Finalize(context.Background(), 4)
+	value := Replacement{Marks: []initialread.Mark{}, CandidateDecisions: []Decision{}}
+	if _, err := service.ReplaceFinal(context.Background(), 4, 15, value); err != nil {
+		t.Fatalf("ReplaceFinal: %v", err)
+	}
+	if store.saves != 1 {
+		t.Fatalf("saves = %d", store.saves)
+	}
+	result, err := service.Finalize(context.Background(), 4, 15)
 	if err != nil {
 		t.Fatalf("Finalize: %v", err)
 	}
 	if store.finalizes != 1 || result.Status != "" {
 		t.Fatalf("finalizes = %d result = %+v", store.finalizes, result)
+	}
+	want := []int64{15, 15, 15, 15}
+	if !reflect.DeepEqual(store.userSeen, want) {
+		t.Fatalf("users passed to store = %v, want %v", store.userSeen, want)
+	}
+}
+
+func TestFinalReadRejectsInvalidUser(t *testing.T) {
+	for _, userID := range []int64{0, -1} {
+		store := &recordingStore{}
+		service := NewService(store)
+		if _, err := service.GetAI(context.Background(), 4, userID); !errors.Is(err, ErrInvalid) {
+			t.Fatalf("GetAI user %d error = %v, want ErrInvalid", userID, err)
+		}
+		if _, err := service.GetFinal(context.Background(), 4, userID); !errors.Is(err, ErrInvalid) {
+			t.Fatalf("GetFinal user %d error = %v, want ErrInvalid", userID, err)
+		}
+		if _, err := service.ReplaceFinal(context.Background(), 4, userID, Replacement{Marks: []initialread.Mark{}, CandidateDecisions: []Decision{}}); !errors.Is(err, ErrInvalid) {
+			t.Fatalf("ReplaceFinal user %d error = %v, want ErrInvalid", userID, err)
+		}
+		if _, err := service.Finalize(context.Background(), 4, userID); !errors.Is(err, ErrInvalid) {
+			t.Fatalf("Finalize user %d error = %v, want ErrInvalid", userID, err)
+		}
+		if len(store.userSeen) != 0 {
+			t.Fatalf("invalid user %d reached the store: %v", userID, store.userSeen)
+		}
+	}
+}
+
+func TestFinalReadPropagatesAssignedToAnotherUser(t *testing.T) {
+	store := &recordingStore{aiErr: fail(ErrAssignedToAnotherUser, "assigned")}
+	service := NewService(store)
+	if _, err := service.GetAI(context.Background(), 4, 15); !errors.Is(err, ErrAssignedToAnotherUser) {
+		t.Fatalf("error = %v, want ErrAssignedToAnotherUser", err)
 	}
 }

@@ -3,6 +3,7 @@
 // Only GET requests reach the existing Go proxy; nothing else is contacted.
 
 import type { CaseMetadata } from '../case.ts'
+import { authenticatedFetch } from '../auth/session.ts'
 import { SeriesError, buildSeriesPlan } from './series.ts'
 import type { SeriesPlan } from './series.ts'
 
@@ -21,7 +22,7 @@ async function requestJson(url: string, signal: AbortSignal, timeoutMs: number):
   signal.addEventListener('abort', forwardAbort, { once: true })
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
   try {
-    const response = await fetch(url, {
+    const response = await authenticatedFetch(url, {
       signal: controller.signal,
       headers: { Accept: 'application/dicom+json' },
       cache: 'no-store',

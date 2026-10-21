@@ -124,6 +124,15 @@ function parseDecision(payload: unknown, index: number, seen: Set<string>): Cand
   return { candidate_id: candidateId, decision: 'dismissed', dismiss_reason: reason }
 }
 
+function parseReaderName(value: unknown): string {
+  // The server now returns the authenticated owner's display name. Preserve it
+  // byte-for-byte; only an empty/blank/non-string value is malformed.
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    throw new FinalApiError('final read reader is not a display name')
+  }
+  return value
+}
+
 export function parseFinalRead(payload: unknown, caseId: number): FinalRead {
   if (!isRecord(payload)) {
     throw new FinalApiError('final read response is not an object')
@@ -134,9 +143,10 @@ export function parseFinalRead(payload: unknown, caseId: number): FinalRead {
   if (payload.case_id !== caseId) {
     throw new FinalApiError('final read does not belong to the requested case')
   }
-  if (payload.kind !== 'final' || payload.reader !== 'reader') {
+  if (payload.kind !== 'final') {
     throw new FinalApiError('final read identity is unexpected')
   }
+  const reader = parseReaderName(payload.reader)
   const lockedAt = payload.locked_at
   if (lockedAt !== null && typeof lockedAt !== 'string') {
     throw new FinalApiError('final read locked_at is not a timestamp or null')
@@ -170,7 +180,7 @@ export function parseFinalRead(payload: unknown, caseId: number): FinalRead {
     id: payload.id as number,
     case_id: caseId,
     kind: 'final',
-    reader: 'reader',
+    reader,
     locked_at: lockedAt,
     marks,
     candidate_decisions: decisions,

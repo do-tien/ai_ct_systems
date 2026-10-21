@@ -14,8 +14,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"nodule-reader/backend/internal/application/finalread"
 	"nodule-reader/backend/internal/application/initialread"
 	"nodule-reader/backend/internal/infrastructure/postgres"
 	httpapi "nodule-reader/backend/internal/transport/http"
@@ -46,8 +48,8 @@ func seedInitialRead(t *testing.T, pool *pgxpool.Pool, caseID int64) int64 {
 	ctx := context.Background()
 	var readID int64
 	if err := pool.QueryRow(ctx,
-		`INSERT INTO reads (case_id, kind, reader) VALUES ($1, 'initial', $2) RETURNING id`,
-		caseID, initialread.Reader).Scan(&readID); err != nil {
+		`INSERT INTO reads (case_id, kind, reader_user_id) VALUES ($1, 'initial', $2) RETURNING id`,
+		caseID, readerUserID(t, pool)).Scan(&readID); err != nil {
 		t.Fatalf("seed read: %v", err)
 	}
 	return readID
@@ -117,10 +119,10 @@ func TestInitialReadStore(t *testing.T) {
 		if _, err := store.GetCase(ctx, 99999999); !errors.Is(err, initialread.ErrNotFound) {
 			t.Fatalf("missing GetCase error = %v, want ErrNotFound", err)
 		}
-		if _, err := store.GetOrCreateInitial(ctx, 99999999, initialread.Reader); !errors.Is(err, initialread.ErrNotFound) {
+		if _, err := store.GetOrCreateInitial(ctx, 99999999, readerUserID(t, pool)); !errors.Is(err, initialread.ErrNotFound) {
 			t.Fatalf("missing GetInitial error = %v, want ErrNotFound", err)
 		}
-		if _, err := store.ReplaceInitialMarks(ctx, 99999999, initialread.Reader, []initialread.Mark{markA()}); !errors.Is(err, initialread.ErrNotFound) {
+		if _, err := store.ReplaceInitialMarks(ctx, 99999999, readerUserID(t, pool), []initialread.Mark{markA()}); !errors.Is(err, initialread.ErrNotFound) {
 			t.Fatalf("missing ReplaceInitialMarks error = %v, want ErrNotFound", err)
 		}
 	})
@@ -146,7 +148,7 @@ func TestInitialReadStore(t *testing.T) {
 			go func() {
 				ready.Done()
 				<-start
-				read, err := store.GetOrCreateInitial(ctx, caseID, initialread.Reader)
+				read, err := store.GetOrCreateInitial(ctx, caseID, readerUserID(t, pool))
 				results <- outcome{read: read, err: err}
 			}()
 		}
@@ -171,18 +173,18 @@ func TestInitialReadStore(t *testing.T) {
 		store, pool := initialStore(t, h)
 		caseID := seedCase(t, pool, "1.2.3.4.5.1003", "awaiting_read")
 
-		saved, err := store.ReplaceInitialMarks(ctx, caseID, initialread.Reader, []initialread.Mark{markA(), markB()})
+		saved, err := store.ReplaceInitialMarks(ctx, caseID, readerUserID(t, pool), []initialread.Mark{markA(), markB()})
 		if err != nil {
 			t.Fatalf("ReplaceInitialMarks: %v", err)
 		}
 		if len(saved) != 2 {
 			t.Fatalf("saved = %d marks, want 2", len(saved))
 		}
-		read, err := store.GetOrCreateInitial(ctx, caseID, initialread.Reader)
+		read, err := store.GetOrCreateInitial(ctx, caseID, readerUserID(t, pool))
 		if err != nil {
 			t.Fatalf("GetInitial: %v", err)
 		}
-		if read.Reader != initialread.Reader || read.Kind != initialread.KindInitial || read.LockedAt != nil {
+		if read.Reader != integrationReaderName || read.Kind != initialread.KindInitial || read.LockedAt != nil {
 			t.Fatalf("read = %+v", read)
 		}
 		if !reflect.DeepEqual(read.Marks, []initialread.Mark{markA(), markB()}) {
@@ -197,17 +199,17 @@ func TestInitialReadStore(t *testing.T) {
 		store, pool := initialStore(t, h)
 		caseID := seedCase(t, pool, "1.2.3.4.5.1004", "awaiting_read")
 
-		if _, err := store.ReplaceInitialMarks(ctx, caseID, initialread.Reader, []initialread.Mark{markA(), markB()}); err != nil {
+		if _, err := store.ReplaceInitialMarks(ctx, caseID, readerUserID(t, pool), []initialread.Mark{markA(), markB()}); err != nil {
 			t.Fatalf("first replace: %v", err)
 		}
-		replaced, err := store.ReplaceInitialMarks(ctx, caseID, initialread.Reader, []initialread.Mark{markC()})
+		replaced, err := store.ReplaceInitialMarks(ctx, caseID, readerUserID(t, pool), []initialread.Mark{markC()})
 		if err != nil {
 			t.Fatalf("second replace: %v", err)
 		}
 		if !reflect.DeepEqual(replaced, []initialread.Mark{markC()}) {
 			t.Fatalf("second replace returned %+v", replaced)
 		}
-		read, err := store.GetOrCreateInitial(ctx, caseID, initialread.Reader)
+		read, err := store.GetOrCreateInitial(ctx, caseID, readerUserID(t, pool))
 		if err != nil {
 			t.Fatalf("GetInitial after replace: %v", err)
 		}
@@ -215,14 +217,14 @@ func TestInitialReadStore(t *testing.T) {
 			t.Fatalf("marks after replace = %+v, want only markC", read.Marks)
 		}
 
-		cleared, err := store.ReplaceInitialMarks(ctx, caseID, initialread.Reader, []initialread.Mark{})
+		cleared, err := store.ReplaceInitialMarks(ctx, caseID, readerUserID(t, pool), []initialread.Mark{})
 		if err != nil {
 			t.Fatalf("clear: %v", err)
 		}
 		if cleared == nil || len(cleared) != 0 {
 			t.Fatalf("cleared = %#v, want a non-nil empty slice", cleared)
 		}
-		read, err = store.GetOrCreateInitial(ctx, caseID, initialread.Reader)
+		read, err = store.GetOrCreateInitial(ctx, caseID, readerUserID(t, pool))
 		if err != nil {
 			t.Fatalf("GetInitial after clear: %v", err)
 		}
@@ -244,10 +246,10 @@ func TestInitialReadStore(t *testing.T) {
 		normalMark := markA()
 		normalMark.ViewPlaneNormal = []float64{0, 0, 2.5}
 		input := []initialread.Mark{markB(), normalMark, markC()}
-		if _, err := store.ReplaceInitialMarks(ctx, caseID, initialread.Reader, input); err != nil {
+		if _, err := store.ReplaceInitialMarks(ctx, caseID, readerUserID(t, pool), input); err != nil {
 			t.Fatalf("replace: %v", err)
 		}
-		read, err := store.GetOrCreateInitial(ctx, caseID, initialread.Reader)
+		read, err := store.GetOrCreateInitial(ctx, caseID, readerUserID(t, pool))
 		if err != nil {
 			t.Fatalf("GetInitial: %v", err)
 		}
@@ -264,7 +266,7 @@ func TestInitialReadStore(t *testing.T) {
 		caseID := seedCase(t, pool, "1.2.3.4.5.1006", "awaiting_read")
 		readID := seedInitialRead(t, pool, caseID)
 
-		if _, err := store.ReplaceInitialMarks(ctx, caseID, initialread.Reader, []initialread.Mark{markA(), markB()}); err != nil {
+		if _, err := store.ReplaceInitialMarks(ctx, caseID, readerUserID(t, pool), []initialread.Mark{markA(), markB()}); err != nil {
 			t.Fatalf("seed marks: %v", err)
 		}
 		if _, err := pool.Exec(ctx, `UPDATE reads SET locked_at = now() WHERE id = $1`, readID); err != nil {
@@ -274,14 +276,14 @@ func TestInitialReadStore(t *testing.T) {
 			t.Fatalf("lock case: %v", err)
 		}
 
-		if _, err := store.ReplaceInitialMarks(ctx, caseID, initialread.Reader, []initialread.Mark{markC()}); !errors.Is(err, initialread.ErrLocked) {
+		if _, err := store.ReplaceInitialMarks(ctx, caseID, readerUserID(t, pool), []initialread.Mark{markC()}); !errors.Is(err, initialread.ErrLocked) {
 			t.Fatalf("locked replace error = %v, want ErrLocked", err)
 		}
 		if got := countRows(t, ctx, pool, `SELECT count(*) FROM marks WHERE read_id = $1`, readID); got != 2 {
 			t.Fatalf("marks after rejected write = %d, want 2", got)
 		}
 
-		read, err := store.GetOrCreateInitial(ctx, caseID, initialread.Reader)
+		read, err := store.GetOrCreateInitial(ctx, caseID, readerUserID(t, pool))
 		if err != nil {
 			t.Fatalf("locked GetInitial: %v", err)
 		}
@@ -295,7 +297,7 @@ func TestInitialReadStore(t *testing.T) {
 		if _, err := pool.Exec(ctx, `UPDATE cases SET status = 'finalized', finalized_at = now() WHERE id = $1`, caseID); err != nil {
 			t.Fatalf("finalize case: %v", err)
 		}
-		if _, err := store.ReplaceInitialMarks(ctx, caseID, initialread.Reader, []initialread.Mark{}); !errors.Is(err, initialread.ErrLocked) {
+		if _, err := store.ReplaceInitialMarks(ctx, caseID, readerUserID(t, pool), []initialread.Mark{}); !errors.Is(err, initialread.ErrLocked) {
 			t.Fatalf("finalized replace error = %v, want ErrLocked", err)
 		}
 		if got := countRows(t, ctx, pool, `SELECT count(*) FROM marks WHERE read_id = $1`, readID); got != 2 {
@@ -310,18 +312,18 @@ func TestInitialReadStore(t *testing.T) {
 		store, pool := initialStore(t, h)
 
 		locked := seedCase(t, pool, "1.2.3.4.5.1007", "initial_locked")
-		if _, err := store.GetOrCreateInitial(ctx, locked, initialread.Reader); !errors.Is(err, initialread.ErrLocked) {
+		if _, err := store.GetOrCreateInitial(ctx, locked, readerUserID(t, pool)); !errors.Is(err, initialread.ErrLocked) {
 			t.Fatalf("GetInitial later-state error = %v, want ErrLocked", err)
 		}
 		if got := countRows(t, ctx, pool, `SELECT count(*) FROM reads WHERE case_id = $1`, locked); got != 0 {
 			t.Fatalf("reads = %d, want 0 (must not fabricate a draft)", got)
 		}
-		if _, err := store.ReplaceInitialMarks(ctx, locked, initialread.Reader, []initialread.Mark{markA()}); !errors.Is(err, initialread.ErrLocked) {
+		if _, err := store.ReplaceInitialMarks(ctx, locked, readerUserID(t, pool), []initialread.Mark{markA()}); !errors.Is(err, initialread.ErrLocked) {
 			t.Fatalf("ReplaceInitialMarks later-state error = %v, want ErrLocked", err)
 		}
 
 		finalized := seedCase(t, pool, "1.2.3.4.5.1008", "finalized")
-		if _, err := store.GetOrCreateInitial(ctx, finalized, initialread.Reader); !errors.Is(err, initialread.ErrLocked) {
+		if _, err := store.GetOrCreateInitial(ctx, finalized, readerUserID(t, pool)); !errors.Is(err, initialread.ErrLocked) {
 			t.Fatalf("finalized GetInitial error = %v, want ErrLocked", err)
 		}
 	})
@@ -378,17 +380,17 @@ func TestInitialReadReplacementRollback(t *testing.T) {
 		store, pool := initialStore(t, h)
 		caseID := seedCase(t, pool, "1.2.3.4.5.1101", "awaiting_read")
 		seedInitialRead(t, pool, caseID)
-		if _, err := store.ReplaceInitialMarks(ctx, caseID, initialread.Reader, []initialread.Mark{markA(), markB()}); err != nil {
+		if _, err := store.ReplaceInitialMarks(ctx, caseID, readerUserID(t, pool), []initialread.Mark{markA(), markB()}); err != nil {
 			t.Fatalf("seed marks: %v", err)
 		}
 
 		installMarkRejectTrigger(t, h)
 
-		_, err := store.ReplaceInitialMarks(ctx, caseID, initialread.Reader, []initialread.Mark{markA(), failingSecondMark})
+		_, err := store.ReplaceInitialMarks(ctx, caseID, readerUserID(t, pool), []initialread.Mark{markA(), failingSecondMark})
 		if !errors.Is(err, initialread.ErrDependency) {
 			t.Fatalf("replacement error = %v, want ErrDependency", err)
 		}
-		read, err := store.GetOrCreateInitial(ctx, caseID, initialread.Reader)
+		read, err := store.GetOrCreateInitial(ctx, caseID, readerUserID(t, pool))
 		if err != nil {
 			t.Fatalf("GetInitial: %v", err)
 		}
@@ -408,7 +410,7 @@ func TestInitialReadReplacementRollback(t *testing.T) {
 
 		failing := markA()
 		failing.Note = fixtureNote()
-		if _, err := store.ReplaceInitialMarks(ctx, caseID, initialread.Reader, []initialread.Mark{failing}); !errors.Is(err, initialread.ErrDependency) {
+		if _, err := store.ReplaceInitialMarks(ctx, caseID, readerUserID(t, pool), []initialread.Mark{failing}); !errors.Is(err, initialread.ErrDependency) {
 			t.Fatalf("replacement error = %v, want ErrDependency", err)
 		}
 		if got := countRows(t, ctx, pool, `SELECT count(*) FROM reads WHERE case_id = $1`, caseID); got != 0 {
@@ -428,7 +430,7 @@ func TestInitialReadSerializedSnapshot(t *testing.T) {
 	store, pool := initialStore(t, h)
 	caseID := seedCase(t, pool, "1.2.3.4.5.1201", "awaiting_read")
 	readID := seedInitialRead(t, pool, caseID)
-	if _, err := store.ReplaceInitialMarks(ctx, caseID, initialread.Reader, []initialread.Mark{markA(), markB()}); err != nil {
+	if _, err := store.ReplaceInitialMarks(ctx, caseID, readerUserID(t, pool), []initialread.Mark{markA(), markB()}); err != nil {
 		t.Fatalf("seed marks: %v", err)
 	}
 
@@ -458,7 +460,7 @@ func TestInitialReadSerializedSnapshot(t *testing.T) {
 	}
 	done := make(chan outcome, 1)
 	go func() {
-		read, err := store.GetOrCreateInitial(ctx, caseID, initialread.Reader)
+		read, err := store.GetOrCreateInitial(ctx, caseID, readerUserID(t, pool))
 		done <- outcome{read: read, err: err}
 	}()
 
@@ -493,7 +495,7 @@ func TestInitialReadCanceledUnderLock(t *testing.T) {
 	store, pool := initialStore(t, h)
 	caseID := seedCase(t, pool, "1.2.3.4.5.1301", "awaiting_read")
 	readID := seedInitialRead(t, pool, caseID)
-	if _, err := store.ReplaceInitialMarks(ctx, caseID, initialread.Reader, []initialread.Mark{markA()}); err != nil {
+	if _, err := store.ReplaceInitialMarks(ctx, caseID, readerUserID(t, pool), []initialread.Mark{markA()}); err != nil {
 		t.Fatalf("seed marks: %v", err)
 	}
 
@@ -509,7 +511,7 @@ func TestInitialReadCanceledUnderLock(t *testing.T) {
 
 	canceled, cancel := context.WithTimeout(ctx, 300*time.Millisecond)
 	defer cancel()
-	if _, err := store.GetOrCreateInitial(canceled, caseID, initialread.Reader); !errors.Is(err, initialread.ErrDependency) {
+	if _, err := store.GetOrCreateInitial(canceled, caseID, readerUserID(t, pool)); !errors.Is(err, initialread.ErrDependency) {
 		t.Fatalf("canceled GetInitial error = %v, want ErrDependency", err)
 	}
 	if got := countRows(t, ctx, pool, `SELECT count(*) FROM marks WHERE read_id = $1`, readID); got != 1 {
@@ -519,7 +521,7 @@ func TestInitialReadCanceledUnderLock(t *testing.T) {
 	if err := ownerTx.Commit(ctx); err != nil {
 		t.Fatalf("commit owner tx: %v", err)
 	}
-	read, err := store.GetOrCreateInitial(ctx, caseID, initialread.Reader)
+	read, err := store.GetOrCreateInitial(ctx, caseID, readerUserID(t, pool))
 	if err != nil {
 		t.Fatalf("GetInitial after release: %v (connection not released?)", err)
 	}
@@ -558,7 +560,9 @@ func TestInitialReadHTTPIntegration(t *testing.T) {
 	h.grantRuntime(t)
 	pool := importRuntimePool(t, h)
 	store := postgres.NewInitialReadStore(pool)
-	handler := httpapi.NewRouter(nil, initialread.NewService(store), nil, nil, http.NotFoundHandler())
+	owner := readerUserID(t, pool)
+	handler := httpapi.NewRouter(nil, initialread.NewService(store), nil, nil, http.NotFoundHandler(),
+		integrationAuthService{userID: owner, displayName: integrationReaderName}, false)
 
 	caseID := seedCase(t, pool, "1.2.3.4.5.1401", "awaiting_read")
 	if _, err := pool.Exec(ctx, `INSERT INTO ai_jobs (case_id, status) VALUES ($1, 'queued')`, caseID); err != nil {
@@ -572,7 +576,7 @@ func TestInitialReadHTTPIntegration(t *testing.T) {
 		} else {
 			reader = strings.NewReader("")
 		}
-		request := httptest.NewRequest(method, target, reader)
+		request := withIntegrationSession(httptest.NewRequest(method, target, reader))
 		if contentType != "" {
 			request.Header.Set("Content-Type", contentType)
 		}
@@ -610,7 +614,7 @@ func TestInitialReadHTTPIntegration(t *testing.T) {
 	if err := json.Unmarshal(readRecorder.Body.Bytes(), &readBody); err != nil {
 		t.Fatalf("decode read: %v", err)
 	}
-	if readBody.CaseID != caseID || readBody.Kind != "initial" || readBody.Reader != "reader" {
+	if readBody.CaseID != caseID || readBody.Kind != "initial" || readBody.Reader != integrationReaderName {
 		t.Fatalf("read identity = %+v", readBody)
 	}
 	if len(readBody.Marks) != 2 {
@@ -644,13 +648,13 @@ func TestInitialReadHTTPIntegration(t *testing.T) {
 		t.Fatalf("case keys = %v, want %v", gotKeys, wantKeys)
 	}
 
-	owner := h.owner(t)
-	if _, err := owner.Exec(ctx,
+	ownerConn := h.owner(t)
+	if _, err := ownerConn.Exec(ctx,
 		`UPDATE ai_jobs SET status = 'succeeded', result = '{"candidates":[{"id":"c1","score":0.9}]}'::jsonb, finished_at = now() WHERE case_id = $1`,
 		caseID); err != nil {
 		t.Fatalf("update job: %v", err)
 	}
-	if _, err := owner.Exec(ctx, `UPDATE ai_jobs SET status = 'failed', error_code = 'MODEL_ERROR', result = NULL WHERE case_id = $1`, caseID); err != nil {
+	if _, err := ownerConn.Exec(ctx, `UPDATE ai_jobs SET status = 'failed', error_code = 'MODEL_ERROR', result = NULL WHERE case_id = $1`, caseID); err != nil {
 		t.Fatalf("fail job: %v", err)
 	}
 	after := do(http.MethodGet, casePath, "", "")
@@ -661,5 +665,163 @@ func TestInitialReadHTTPIntegration(t *testing.T) {
 		if strings.Contains(after.Body.String(), forbidden) {
 			t.Fatalf("case response leaked %q: %s", forbidden, after.Body.String())
 		}
+	}
+}
+
+// TestCaseOwnershipTwoUsers proves first access assigns the case to exactly one
+// authenticated user and every later initial/final action stays with that owner.
+func TestCaseOwnershipTwoUsers(t *testing.T) {
+	ctx := context.Background()
+	h := newStorageHarness(t)
+	h.migrate(t)
+	h.grantRuntime(t)
+	pool := importRuntimePool(t, h)
+	initialReads := postgres.NewInitialReadStore(pool)
+	finalStore := postgres.NewFinalReadStore(pool)
+
+	userA := seedUser(t, pool, "Reader A")
+	userB := seedUser(t, pool, "Reader B")
+	if userA == userB {
+		t.Fatalf("seed users share id %d", userA)
+	}
+	caseID := seedCase(t, pool, "1.2.3.4.5.1501", "awaiting_read")
+
+	type outcome struct {
+		user int64
+		read initialread.Read
+		err  error
+	}
+	results := make(chan outcome, 2)
+	start := make(chan struct{})
+	var ready sync.WaitGroup
+	ready.Add(2)
+	for _, userID := range []int64{userA, userB} {
+		go func() {
+			ready.Done()
+			<-start
+			read, err := initialReads.GetOrCreateInitial(ctx, caseID, userID)
+			results <- outcome{user: userID, read: read, err: err}
+		}()
+	}
+	ready.Wait()
+	close(start)
+
+	var winner, loser int64
+	var winnerRead initialread.Read
+	for range 2 {
+		got := <-results
+		switch {
+		case got.err == nil:
+			winner, winnerRead = got.user, got.read
+		case errors.Is(got.err, initialread.ErrForbidden):
+			loser = got.user
+		default:
+			t.Fatalf("unexpected error for user %d: %v", got.user, got.err)
+		}
+	}
+	if winner == 0 || loser == 0 {
+		t.Fatalf("winner = %d loser = %d, want exactly one owner", winner, loser)
+	}
+	if got := countRows(t, ctx, pool, `SELECT count(*) FROM reads WHERE case_id = $1`, caseID); got != 1 {
+		t.Fatalf("reads = %d, want one", got)
+	}
+	var storedOwner int64
+	if err := pool.QueryRow(ctx, `SELECT reader_user_id FROM reads WHERE id = $1`, winnerRead.ID).Scan(&storedOwner); err != nil {
+		t.Fatalf("read owner: %v", err)
+	}
+	if storedOwner != winner {
+		t.Fatalf("stored owner = %d, want %d", storedOwner, winner)
+	}
+	wantName := "Reader A"
+	if winner == userB {
+		wantName = "Reader B"
+	}
+	if winnerRead.Reader != wantName {
+		t.Fatalf("read reader = %q, want %q", winnerRead.Reader, wantName)
+	}
+
+	if _, err := initialReads.ReplaceInitialMarks(ctx, caseID, loser, []initialread.Mark{markC()}); !errors.Is(err, initialread.ErrForbidden) {
+		t.Fatalf("loser replace error = %v, want ErrForbidden", err)
+	}
+	if _, err := initialReads.ReplaceInitialMarks(ctx, caseID, winner, []initialread.Mark{markA(), markB()}); err != nil {
+		t.Fatalf("owner replace: %v", err)
+	}
+
+	seedJob(t, pool, caseID, "succeeded", syntheticAISuccess(t, "1.2.3.4.5.1501", "1.2.3.4.7", "c1"), nil)
+	submitted, err := initialReads.SubmitInitial(ctx, caseID, winner)
+	if err != nil {
+		t.Fatalf("owner submit: %v", err)
+	}
+	if _, err := initialReads.SubmitInitial(ctx, caseID, loser); !errors.Is(err, initialread.ErrForbidden) {
+		t.Fatalf("loser submit error = %v, want ErrForbidden", err)
+	}
+	if _, err := initialReads.ReplaceInitialMarks(ctx, caseID, winner, []initialread.Mark{}); !errors.Is(err, initialread.ErrLocked) {
+		t.Fatalf("owner replace after lock error = %v, want ErrLocked", err)
+	}
+	if _, err := initialReads.GetOrCreateInitial(ctx, caseID, loser); !errors.Is(err, initialread.ErrForbidden) {
+		t.Fatalf("loser GetInitial error = %v, want ErrForbidden", err)
+	}
+
+	var finalOwner int64
+	if err := pool.QueryRow(ctx, `SELECT reader_user_id FROM reads WHERE case_id = $1 AND kind = 'final'`, caseID).Scan(&finalOwner); err != nil {
+		t.Fatalf("final owner: %v", err)
+	}
+	if finalOwner != winner || submitted.FinalReadID <= 0 {
+		t.Fatalf("final owner = %d (%d), want %d", finalOwner, submitted.FinalReadID, winner)
+	}
+
+	if _, err := finalStore.GetAI(ctx, caseID, loser); !errors.Is(err, finalread.ErrAssignedToAnotherUser) {
+		t.Fatalf("loser GetAI error = %v, want ErrAssignedToAnotherUser", err)
+	}
+	if _, err := finalStore.GetFinal(ctx, caseID, loser); !errors.Is(err, finalread.ErrAssignedToAnotherUser) {
+		t.Fatalf("loser GetFinal error = %v, want ErrAssignedToAnotherUser", err)
+	}
+	if _, err := finalStore.ReplaceFinal(ctx, caseID, loser, finalread.Replacement{
+		Marks:              []initialread.Mark{withFinalOrigin(markC(), finalread.OriginReader, nil)},
+		CandidateDecisions: []finalread.Decision{},
+	}); !errors.Is(err, finalread.ErrAssignedToAnotherUser) {
+		t.Fatalf("loser ReplaceFinal error = %v, want ErrAssignedToAnotherUser", err)
+	}
+	if _, err := finalStore.Finalize(ctx, caseID, loser); !errors.Is(err, finalread.ErrAssignedToAnotherUser) {
+		t.Fatalf("loser Finalize error = %v, want ErrAssignedToAnotherUser", err)
+	}
+
+	// The winner keeps the full post-lock workflow.
+	if _, err := finalStore.GetAI(ctx, caseID, winner); err != nil {
+		t.Fatalf("owner GetAI: %v", err)
+	}
+	value := finalread.Replacement{
+		Marks:              []initialread.Mark{withFinalOrigin(markA(), finalread.OriginFromAICandidate, new("c1"))},
+		CandidateDecisions: []finalread.Decision{{CandidateID: "c1", Decision: finalread.DecisionAccepted}},
+	}
+	if _, err := finalStore.ReplaceFinal(ctx, caseID, winner, value); err != nil {
+		t.Fatalf("owner ReplaceFinal: %v", err)
+	}
+	if _, err := finalStore.Finalize(ctx, caseID, winner); err != nil {
+		t.Fatalf("owner Finalize: %v", err)
+	}
+
+	// Every clinical mutation is audited with both the user id and the snapshot.
+	assertEvent := func(action string, wantID int64) {
+		t.Helper()
+		var actor string
+		var actorID pgtype.Int8
+		if err := pool.QueryRow(ctx, `SELECT actor, actor_user_id FROM events WHERE case_id = $1 AND action = $2`, caseID, action).Scan(&actor, &actorID); err != nil {
+			t.Fatalf("%s event: %v", action, err)
+		}
+		if !actorID.Valid || actorID.Int64 != wantID || actor != wantName {
+			t.Fatalf("%s event actor = %q/%+v, want %q/%d", action, actor, actorID, wantName, wantID)
+		}
+	}
+	assertEvent("initial_submitted", winner)
+	assertEvent("final_read_saved", winner)
+	assertEvent("case_finalized", winner)
+
+	// No loser-owned read or event was created.
+	if got := countRows(t, ctx, pool, `SELECT count(*) FROM reads WHERE reader_user_id = $1`, loser); got != 0 {
+		t.Fatalf("loser owns %d reads, want none", got)
+	}
+	if got := countRows(t, ctx, pool, `SELECT count(*) FROM events WHERE case_id = $1 AND actor_user_id IS DISTINCT FROM $2`, caseID, winner); got != 0 {
+		t.Fatalf("%d events carry another actor", got)
 	}
 }

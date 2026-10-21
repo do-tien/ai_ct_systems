@@ -1,10 +1,31 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import CasePage from './CasePage.tsx'
+import LoginPanel from './LoginPanel.tsx'
 import UploadPanel from './UploadPanel.tsx'
+import UserBar from './UserBar.tsx'
+import {
+  AuthApiError,
+  loadSession,
+  login as loginRequest,
+  logout as logoutRequest,
+} from './auth/api.ts'
+import {
+  AUTH_REQUIRED_EVENT,
+  createAuthGenerationGate,
+  scheduleSessionExpiry,
+} from './auth/session.ts'
+import type { AuthGenerationGate, SessionExpiryHandle } from './auth/session.ts'
+import type { AuthSession } from './auth/types.ts'
 
 type CheckName = 'backend' | 'postgres' | 'orthanc'
 type RowState = 'loading' | 'ok' | 'unavailable' | 'unknown'
+
+type AuthView =
+  | { status: 'loading' }
+  | { status: 'anonymous' }
+  | { status: 'authenticated'; session: AuthSession }
+  | { status: 'failed'; message: string }
 
 const CHECK_ORDER: CheckName[] = ['backend', 'postgres', 'orthanc']
 
@@ -23,6 +44,8 @@ const ROW_TEXT: Record<RowState, string> = {
 
 const REQUEST_TIMEOUT_MS = 5000
 const INVALID_RESPONSE_MESSAGE = 'Không kết nối được backend hoặc phản hồi không hợp lệ'
+const AUTH_LOAD_ERROR_MESSAGE = 'Không kiểm tra được phiên làm việc. Kiểm tra kết nối rồi thử lại.'
+const LOGIN_ERROR_MESSAGE = 'Không đăng nhập được. Kiểm tra kết nối rồi thử lại.'
 
 // Only a positive decimal case id opens the viewer; anything else keeps the
 // health page and never sends a malformed case request.
@@ -72,6 +95,148 @@ export default function App() {
 
   const mountedRef = useRef(true)
   const activeRequestRef = useRef<AbortController | null>(null)
+
+  const [auth, setAuth] = useState<AuthView>({ status: 'loading' })
+  const [loginPending, setLoginPending] = useState(false)
+  const [loginError, setLoginError] = useState<string | null>(null)
+  const [logoutPending, setLogoutPending] = useState(false)
+
+  const aliveRef = useRef(true)
+  const authRequestRef = useRef<AbortController | null>(null)
+  const expiryRef = useRef<SessionExpiryHandle | null>(null)
+  const gateRef = useRef<AuthGenerationGate | null>(null)
+  if (gateRef.current === null) {
+    gateRef.current = createAuthGenerationGate()
+  }
+  const gate = gateRef.current
+  // Mirrors the auth view for event handlers, which must decide synchronously
+  // whether a 401 belongs to the authenticated generation.
+  const authRef = useRef<AuthView>({ status: 'loading' })
+
+  const updateAuth = useCallback((next: AuthView) => {
+    authRef.current = next
+    setAuth(next)
+  }, [])
+
+  const cancelExpiry = useCallback(() => {
+    expiryRef.current?.cancel()
+    expiryRef.current = null
+  }, [])
+
+  // Retires the mounted generation before clearing the user. Late session,
+  // login or logout results then fail the gate check and cannot repopulate the
+  // next user's UI. `force` is used by expiry, where there is no authenticated
+  // view yet or the timestamp itself proved unusable.
+  const retireSession = useCallback(
+    (options: { force?: boolean } = {}) => {
+      if (options.force !== true && authRef.current.status !== 'authenticated') {
+        return
+      }
+      gate.retire()
+      authRequestRef.current?.abort()
+      authRequestRef.current = null
+      cancelExpiry()
+      updateAuth({ status: 'anonymous' })
+      setLoginPending(false)
+      setLoginError(null)
+      setLogoutPending(false)
+    },
+    [cancelExpiry, gate, updateAuth],
+  )
+
+  const applySession = useCallback(
+    (session: AuthSession) => {
+      cancelExpiry()
+      const handle = scheduleSessionExpiry({
+        expiresAt: session.expiresAt,
+        onExpire: () => retireSession({ force: true }),
+      })
+      if (handle === null) {
+        return
+      }
+      expiryRef.current = handle
+      setLoginError(null)
+      updateAuth({ status: 'authenticated', session })
+    },
+    [cancelExpiry, retireSession, updateAuth],
+  )
+
+  const loadAuthSession = useCallback(async () => {
+    const generation = gate.begin()
+    authRequestRef.current?.abort()
+    const controller = new AbortController()
+    authRequestRef.current = controller
+    updateAuth({ status: 'loading' })
+    try {
+      const session = await loadSession(controller.signal)
+      if (!aliveRef.current || !gate.isCurrent(generation)) {
+        return
+      }
+      if (session === null) {
+        updateAuth({ status: 'anonymous' })
+        return
+      }
+      applySession(session)
+    } catch (failure) {
+      if (!aliveRef.current || !gate.isCurrent(generation) || controller.signal.aborted) {
+        return
+      }
+      updateAuth({
+        status: 'failed',
+        message: failure instanceof AuthApiError ? failure.message : AUTH_LOAD_ERROR_MESSAGE,
+      })
+    }
+  }, [applySession, gate, updateAuth])
+
+  const submitLogin = useCallback(
+    async (pin: string) => {
+      const generation = gate.begin()
+      authRequestRef.current?.abort()
+      const controller = new AbortController()
+      authRequestRef.current = controller
+      setLoginPending(true)
+      setLoginError(null)
+      try {
+        const session = await loginRequest(pin, controller.signal)
+        if (!aliveRef.current || !gate.isCurrent(generation)) {
+          return
+        }
+        applySession(session)
+      } catch (failure) {
+        if (!aliveRef.current || !gate.isCurrent(generation) || controller.signal.aborted) {
+          return
+        }
+        setLoginError(failure instanceof AuthApiError ? failure.message : LOGIN_ERROR_MESSAGE)
+      } finally {
+        if (aliveRef.current && gate.isCurrent(generation)) {
+          setLoginPending(false)
+        }
+      }
+    },
+    [applySession, gate],
+  )
+
+  const submitLogout = useCallback(() => {
+    if (logoutPending) {
+      return
+    }
+    const generation = gate.begin()
+    authRequestRef.current?.abort()
+    const controller = new AbortController()
+    authRequestRef.current = controller
+    cancelExpiry()
+    setLogoutPending(true)
+    setLoginError(null)
+    // Logout is best effort, so it resolves even when the session is gone or
+    // the network fails; either way the local session is retired below.
+    void logoutRequest(controller.signal).then(() => {
+      if (!aliveRef.current || !gate.isCurrent(generation)) {
+        return
+      }
+      updateAuth({ status: 'anonymous' })
+      setLogoutPending(false)
+    })
+  }, [cancelExpiry, gate, logoutPending, updateAuth])
 
   const runCheck = useCallback(async () => {
     activeRequestRef.current?.abort()
@@ -132,6 +297,22 @@ export default function App() {
     }
   }, [runCheck])
 
+  useEffect(() => {
+    aliveRef.current = true
+    void loadAuthSession()
+    const onAuthRequired = (): void => {
+      retireSession()
+    }
+    window.addEventListener(AUTH_REQUIRED_EVENT, onAuthRequired)
+    return () => {
+      aliveRef.current = false
+      window.removeEventListener(AUTH_REQUIRED_EVENT, onAuthRequired)
+      authRequestRef.current?.abort()
+      expiryRef.current?.cancel()
+      expiryRef.current = null
+    }
+  }, [loadAuthSession, retireSession])
+
   // A confirmed upload is opened with a full navigation to the existing deep
   // link; no router is added.
   const openCase = useCallback((id: number) => {
@@ -148,16 +329,52 @@ export default function App() {
         </p>
       </header>
 
-      {caseId === null ? (
-        <>
-          <UploadPanel onOpenCase={openCase} />
-          <p className="notice">
-            Một ca đã nhập vẫn mở trực tiếp được bằng địa chỉ <code>/?case=&lt;id&gt;</code>, ví dụ{' '}
-            <code>/?case=1</code>.
+      {auth.status === 'loading' && (
+        <section className="panel auth-loading" aria-busy="true">
+          <p role="status">Đang kiểm tra phiên làm việc…</p>
+        </section>
+      )}
+
+      {auth.status === 'failed' && (
+        <section className="panel auth-failure" aria-labelledby="auth-failure-heading">
+          <h2 id="auth-failure-heading">Không mở được phiên làm việc</h2>
+          <p className="error" role="alert">
+            {auth.message}
           </p>
+          <button type="button" onClick={() => void loadAuthSession()}>
+            Thử lại
+          </button>
+        </section>
+      )}
+
+      {auth.status === 'anonymous' && (
+        <LoginPanel
+          pending={loginPending}
+          error={loginError}
+          onLogin={(pin) => void submitLogin(pin)}
+        />
+      )}
+
+      {auth.status === 'authenticated' && (
+        <>
+          <UserBar
+            displayName={auth.session.user.displayName}
+            pending={logoutPending}
+            onLogout={submitLogout}
+          />
+
+          {caseId === null ? (
+            <>
+              <UploadPanel onOpenCase={openCase} />
+              <p className="notice">
+                Một ca đã nhập vẫn mở trực tiếp được bằng địa chỉ <code>/?case=&lt;id&gt;</code>, ví
+                dụ <code>/?case=1</code>.
+              </p>
+            </>
+          ) : (
+            <CasePage caseId={caseId} />
+          )}
         </>
-      ) : (
-        <CasePage caseId={caseId} />
       )}
 
       <details className="panel diagnostics">

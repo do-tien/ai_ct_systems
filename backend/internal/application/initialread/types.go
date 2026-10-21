@@ -23,6 +23,8 @@ var (
 	// ErrConflict means the stored initial/final read state is inconsistent with
 	// the requested transition (missing draft or an unexpected final read).
 	ErrConflict = errors.New("initial read submission conflicts with stored state")
+	// ErrForbidden means the case's initial read belongs to another user.
+	ErrForbidden = errors.New("case is assigned to another user")
 	// ErrDependency means the storage dependency failed before COMMIT, so the
 	// operation is known to have rolled back.
 	ErrDependency = errors.New("initial read storage failed")
@@ -30,10 +32,6 @@ var (
 	// whether the write landed is unknown.
 	ErrCommitOutcomeUnknown = errors.New("initial read commit outcome is unknown")
 )
-
-// Reader is the fixed POC reader identity of the initial read. It is a constant
-// identity for this single-reader scaffold; it is not authentication.
-const Reader = "reader"
 
 // KindInitial is the reads.kind value of the independent initial read.
 const KindInitial = "initial"
@@ -104,12 +102,13 @@ type Read struct {
 }
 
 // Store is the consumer-owned persistence port. Every method propagates the
-// caller's context and classifies failures into the sentinel categories above.
+// caller's context, receives the authenticated owner of the clinical work, and
+// classifies failures into the sentinel categories above.
 type Store interface {
 	GetCase(ctx context.Context, caseID int64) (Case, error)
-	GetOrCreateInitial(ctx context.Context, caseID int64, reader string) (Read, error)
-	ReplaceInitialMarks(ctx context.Context, caseID int64, reader string, marks []Mark) ([]Mark, error)
-	SubmitInitial(ctx context.Context, caseID int64, reader string) (SubmitResult, error)
+	GetOrCreateInitial(ctx context.Context, caseID, userID int64) (Read, error)
+	ReplaceInitialMarks(ctx context.Context, caseID, userID int64, marks []Mark) ([]Mark, error)
+	SubmitInitial(ctx context.Context, caseID, userID int64) (SubmitResult, error)
 }
 
 // SubmitResult is the committed outcome of locking the initial read and

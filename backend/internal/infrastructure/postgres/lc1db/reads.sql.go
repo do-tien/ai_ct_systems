@@ -7,38 +7,60 @@ package lc1db
 
 import (
 	"context"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const createRead = `-- name: CreateRead :one
-INSERT INTO reads (case_id, kind, reader)
-VALUES ($1, $2, $3)
-RETURNING id, case_id, kind, reader, locked_at, created_at
+WITH created AS (
+    INSERT INTO reads (case_id, kind, reader_user_id)
+    VALUES ($1, $2, $3)
+    RETURNING id, case_id, kind, locked_at, created_at, reader_user_id
+)
+SELECT created.id, created.case_id, created.kind,
+       created.locked_at, created.created_at, created.reader_user_id,
+       users.display_name AS reader_display_name
+FROM created
+JOIN users ON users.id = created.reader_user_id
 `
 
 type CreateReadParams struct {
-	CaseID int64
-	Kind   string
-	Reader string
+	CaseID       int64
+	Kind         string
+	ReaderUserID int64
 }
 
-func (q *Queries) CreateRead(ctx context.Context, arg CreateReadParams) (Read, error) {
-	row := q.db.QueryRow(ctx, createRead, arg.CaseID, arg.Kind, arg.Reader)
-	var i Read
+type CreateReadRow struct {
+	ID                int64
+	CaseID            int64
+	Kind              string
+	LockedAt          pgtype.Timestamptz
+	CreatedAt         pgtype.Timestamptz
+	ReaderUserID      int64
+	ReaderDisplayName string
+}
+
+func (q *Queries) CreateRead(ctx context.Context, arg CreateReadParams) (CreateReadRow, error) {
+	row := q.db.QueryRow(ctx, createRead, arg.CaseID, arg.Kind, arg.ReaderUserID)
+	var i CreateReadRow
 	err := row.Scan(
 		&i.ID,
 		&i.CaseID,
 		&i.Kind,
-		&i.Reader,
 		&i.LockedAt,
 		&i.CreatedAt,
+		&i.ReaderUserID,
+		&i.ReaderDisplayName,
 	)
 	return i, err
 }
 
 const getRead = `-- name: GetRead :one
-SELECT id, case_id, kind, reader, locked_at, created_at
-FROM reads
-WHERE case_id = $1 AND kind = $2
+SELECT r.id, r.case_id, r.kind, r.locked_at, r.created_at, r.reader_user_id,
+       u.display_name AS reader_display_name
+FROM reads r
+JOIN users u ON u.id = r.reader_user_id
+WHERE r.case_id = $1 AND r.kind = $2
 `
 
 type GetReadParams struct {
@@ -46,25 +68,38 @@ type GetReadParams struct {
 	Kind   string
 }
 
-func (q *Queries) GetRead(ctx context.Context, arg GetReadParams) (Read, error) {
+type GetReadRow struct {
+	ID                int64
+	CaseID            int64
+	Kind              string
+	LockedAt          pgtype.Timestamptz
+	CreatedAt         pgtype.Timestamptz
+	ReaderUserID      int64
+	ReaderDisplayName string
+}
+
+func (q *Queries) GetRead(ctx context.Context, arg GetReadParams) (GetReadRow, error) {
 	row := q.db.QueryRow(ctx, getRead, arg.CaseID, arg.Kind)
-	var i Read
+	var i GetReadRow
 	err := row.Scan(
 		&i.ID,
 		&i.CaseID,
 		&i.Kind,
-		&i.Reader,
 		&i.LockedAt,
 		&i.CreatedAt,
+		&i.ReaderUserID,
+		&i.ReaderDisplayName,
 	)
 	return i, err
 }
 
 const getReadForUpdate = `-- name: GetReadForUpdate :one
-SELECT id, case_id, kind, reader, locked_at, created_at
-FROM reads
-WHERE case_id = $1 AND kind = $2
-FOR UPDATE
+SELECT r.id, r.case_id, r.kind, r.locked_at, r.created_at, r.reader_user_id,
+       u.display_name AS reader_display_name
+FROM reads r
+JOIN users u ON u.id = r.reader_user_id
+WHERE r.case_id = $1 AND r.kind = $2
+FOR UPDATE OF r
 `
 
 type GetReadForUpdateParams struct {
@@ -72,37 +107,66 @@ type GetReadForUpdateParams struct {
 	Kind   string
 }
 
-func (q *Queries) GetReadForUpdate(ctx context.Context, arg GetReadForUpdateParams) (Read, error) {
+type GetReadForUpdateRow struct {
+	ID                int64
+	CaseID            int64
+	Kind              string
+	LockedAt          pgtype.Timestamptz
+	CreatedAt         pgtype.Timestamptz
+	ReaderUserID      int64
+	ReaderDisplayName string
+}
+
+func (q *Queries) GetReadForUpdate(ctx context.Context, arg GetReadForUpdateParams) (GetReadForUpdateRow, error) {
 	row := q.db.QueryRow(ctx, getReadForUpdate, arg.CaseID, arg.Kind)
-	var i Read
+	var i GetReadForUpdateRow
 	err := row.Scan(
 		&i.ID,
 		&i.CaseID,
 		&i.Kind,
-		&i.Reader,
 		&i.LockedAt,
 		&i.CreatedAt,
+		&i.ReaderUserID,
+		&i.ReaderDisplayName,
 	)
 	return i, err
 }
 
 const lockRead = `-- name: LockRead :one
-UPDATE reads
-SET locked_at = now()
-WHERE id = $1 AND locked_at IS NULL
-RETURNING id, case_id, kind, reader, locked_at, created_at
+WITH locked AS (
+    UPDATE reads
+    SET locked_at = now()
+    WHERE reads.id = $1 AND reads.locked_at IS NULL
+    RETURNING id, case_id, kind, locked_at, created_at, reader_user_id
+)
+SELECT locked.id, locked.case_id, locked.kind,
+       locked.locked_at, locked.created_at, locked.reader_user_id,
+       users.display_name AS reader_display_name
+FROM locked
+JOIN users ON users.id = locked.reader_user_id
 `
 
-func (q *Queries) LockRead(ctx context.Context, id int64) (Read, error) {
+type LockReadRow struct {
+	ID                int64
+	CaseID            int64
+	Kind              string
+	LockedAt          pgtype.Timestamptz
+	CreatedAt         pgtype.Timestamptz
+	ReaderUserID      int64
+	ReaderDisplayName string
+}
+
+func (q *Queries) LockRead(ctx context.Context, id int64) (LockReadRow, error) {
 	row := q.db.QueryRow(ctx, lockRead, id)
-	var i Read
+	var i LockReadRow
 	err := row.Scan(
 		&i.ID,
 		&i.CaseID,
 		&i.Kind,
-		&i.Reader,
 		&i.LockedAt,
 		&i.CreatedAt,
+		&i.ReaderUserID,
+		&i.ReaderDisplayName,
 	)
 	return i, err
 }

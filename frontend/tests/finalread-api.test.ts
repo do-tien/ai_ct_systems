@@ -20,7 +20,7 @@ const READ = {
   id: 7,
   case_id: 4,
   kind: 'final',
-  reader: 'reader',
+  reader: 'Bác sĩ A',
   locked_at: null,
   marks: [MARK],
   candidate_decisions: [DECISION],
@@ -86,13 +86,21 @@ test('rejectsMalformedStateSpecificAI', () => {
 test('parsesFinalEnvelopeWithoutInventingMarks', () => {
   const parsed = parseFinalRead({ ...READ }, 4)
   assert.equal(parsed.kind, 'final')
+  assert.equal(parsed.reader, 'Bác sĩ A')
   assert.equal(parsed.marks.length, 1)
   assert.equal(parsed.candidate_decisions.length, 1)
+
+  // Two users may share a display name; the parser preserves it exactly.
+  assert.equal(parseFinalRead({ ...READ, reader: 'Bác sĩ A' }, 4).reader, 'Bác sĩ A')
+  assert.equal(parseFinalRead({ ...READ, reader: '  Bác sĩ A  ' }, 4).reader, '  Bác sĩ A  ')
 
   // Wrong identity and a bare mark array are rejected; PUT returns an envelope.
   assert.throws(() => parseFinalRead({ ...READ }, 5), FinalApiError)
   assert.throws(() => parseFinalRead({ ...READ, kind: 'initial' }, 4), FinalApiError)
-  assert.throws(() => parseFinalRead({ ...READ, reader: 'other' }, 4), FinalApiError)
+  assert.throws(() => parseFinalRead({ ...READ, reader: '' }, 4), FinalApiError)
+  assert.throws(() => parseFinalRead({ ...READ, reader: '   ' }, 4), FinalApiError)
+  assert.throws(() => parseFinalRead({ ...READ, reader: 7 }, 4), FinalApiError)
+  assert.throws(() => parseFinalRead({ ...READ, reader: null }, 4), FinalApiError)
   assert.throws(() => parseFinalRead([MARK], 4), FinalApiError)
 
   // An accepted decision without a linked mark is preserved, not manufactured.

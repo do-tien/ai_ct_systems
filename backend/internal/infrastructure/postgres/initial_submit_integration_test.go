@@ -102,7 +102,7 @@ func TestSubmitInitialCopiesAndLocks(t *testing.T) {
 		t.Fatalf("seed job: %v", err)
 	}
 	initial := []initialread.Mark{markA(), markB(), markC()}
-	if _, err := store.ReplaceInitialMarks(ctx, caseID, initialread.Reader, initial); err != nil {
+	if _, err := store.ReplaceInitialMarks(ctx, caseID, readerUserID(t, pool), initial); err != nil {
 		t.Fatalf("seed marks: %v", err)
 	}
 	initialReadID, ok := readIDByKind(t, runtime, caseID, "initial")
@@ -110,7 +110,7 @@ func TestSubmitInitialCopiesAndLocks(t *testing.T) {
 		t.Fatalf("initial read missing")
 	}
 
-	result, err := store.SubmitInitial(ctx, caseID, initialread.Reader)
+	result, err := store.SubmitInitial(ctx, caseID, readerUserID(t, pool))
 	if err != nil {
 		t.Fatalf("SubmitInitial: %v", err)
 	}
@@ -139,14 +139,18 @@ func TestSubmitInitialCopiesAndLocks(t *testing.T) {
 	if finalReadID != result.FinalReadID {
 		t.Fatalf("final id = %d, result = %d", finalReadID, result.FinalReadID)
 	}
-	var finalReader string
+	var finalReaderID int64
+	var finalReaderName string
 	var finalLocked *time.Time
 	var finalKind string
-	if err := runtime.QueryRow(ctx, `SELECT kind, reader, locked_at FROM reads WHERE id = $1`, finalReadID).Scan(&finalKind, &finalReader, &finalLocked); err != nil {
+	if err := runtime.QueryRow(ctx,
+		`SELECT r.kind, r.reader_user_id, u.display_name, r.locked_at
+		 FROM reads r JOIN users u ON u.id = r.reader_user_id WHERE r.id = $1`, finalReadID).
+		Scan(&finalKind, &finalReaderID, &finalReaderName, &finalLocked); err != nil {
 		t.Fatalf("final read: %v", err)
 	}
-	if finalKind != "final" || finalReader != initialread.Reader || finalLocked != nil {
-		t.Fatalf("final read = %q/%q/%v", finalKind, finalReader, finalLocked)
+	if finalKind != "final" || finalReaderID != readerUserID(t, pool) || finalReaderName != integrationReaderName || finalLocked != nil {
+		t.Fatalf("final read = %q/%d/%q/%v", finalKind, finalReaderID, finalReaderName, finalLocked)
 	}
 
 	// Field-for-field ordered copy with new IDs, initial unchanged.
@@ -206,10 +210,10 @@ func TestSubmitInitialEmptyDraft(t *testing.T) {
 	runtime := h.runtime(t)
 
 	caseID := seedCase(t, pool, "1.2.3.4.7.101", "awaiting_read")
-	if _, err := store.ReplaceInitialMarks(ctx, caseID, initialread.Reader, []initialread.Mark{}); err != nil {
+	if _, err := store.ReplaceInitialMarks(ctx, caseID, readerUserID(t, pool), []initialread.Mark{}); err != nil {
 		t.Fatalf("create empty draft: %v", err)
 	}
-	result, err := store.SubmitInitial(ctx, caseID, initialread.Reader)
+	result, err := store.SubmitInitial(ctx, caseID, readerUserID(t, pool))
 	if err != nil {
 		t.Fatalf("SubmitInitial: %v", err)
 	}
@@ -233,7 +237,7 @@ func TestSubmitInitialMissingDraft(t *testing.T) {
 	runtime := h.runtime(t)
 
 	caseID := seedCase(t, pool, "1.2.3.4.7.102", "awaiting_read")
-	if _, err := store.SubmitInitial(ctx, caseID, initialread.Reader); !errors.Is(err, initialread.ErrConflict) {
+	if _, err := store.SubmitInitial(ctx, caseID, readerUserID(t, pool)); !errors.Is(err, initialread.ErrConflict) {
 		t.Fatalf("error = %v, want ErrConflict", err)
 	}
 	if status, _ := caseStatus(t, runtime, caseID); status != "awaiting_read" {
@@ -256,12 +260,12 @@ func TestSubmitInitialExistingFinal(t *testing.T) {
 	runtime := h.runtime(t)
 
 	caseID := seedCase(t, pool, "1.2.3.4.7.103", "awaiting_read")
-	if _, err := store.ReplaceInitialMarks(ctx, caseID, initialread.Reader, []initialread.Mark{markA()}); err != nil {
+	if _, err := store.ReplaceInitialMarks(ctx, caseID, readerUserID(t, pool), []initialread.Mark{markA()}); err != nil {
 		t.Fatalf("seed marks: %v", err)
 	}
 	preexisting := seedReadKind(t, runtime, caseID, "final")
 
-	if _, err := store.SubmitInitial(ctx, caseID, initialread.Reader); !errors.Is(err, initialread.ErrConflict) {
+	if _, err := store.SubmitInitial(ctx, caseID, readerUserID(t, pool)); !errors.Is(err, initialread.ErrConflict) {
 		t.Fatalf("error = %v, want ErrConflict", err)
 	}
 	// The preexisting final is not overwritten and the initial is not locked.
@@ -290,14 +294,14 @@ func TestSubmitInitialRepeated(t *testing.T) {
 
 	caseID := seedCase(t, pool, "1.2.3.4.7.104", "awaiting_read")
 	initial := []initialread.Mark{markA(), markB()}
-	if _, err := store.ReplaceInitialMarks(ctx, caseID, initialread.Reader, initial); err != nil {
+	if _, err := store.ReplaceInitialMarks(ctx, caseID, readerUserID(t, pool), initial); err != nil {
 		t.Fatalf("seed marks: %v", err)
 	}
-	first, err := store.SubmitInitial(ctx, caseID, initialread.Reader)
+	first, err := store.SubmitInitial(ctx, caseID, readerUserID(t, pool))
 	if err != nil {
 		t.Fatalf("first submit: %v", err)
 	}
-	if _, err := store.SubmitInitial(ctx, caseID, initialread.Reader); !errors.Is(err, initialread.ErrLocked) {
+	if _, err := store.SubmitInitial(ctx, caseID, readerUserID(t, pool)); !errors.Is(err, initialread.ErrLocked) {
 		t.Fatalf("repeat error = %v, want ErrLocked", err)
 	}
 	var finals int
@@ -323,7 +327,7 @@ func TestSubmitInitialConcurrent(t *testing.T) {
 
 	caseID := seedCase(t, pool, "1.2.3.4.7.105", "awaiting_read")
 	initial := []initialread.Mark{markA(), markB()}
-	if _, err := store.ReplaceInitialMarks(ctx, caseID, initialread.Reader, initial); err != nil {
+	if _, err := store.ReplaceInitialMarks(ctx, caseID, readerUserID(t, pool), initial); err != nil {
 		t.Fatalf("seed marks: %v", err)
 	}
 
@@ -339,7 +343,7 @@ func TestSubmitInitialConcurrent(t *testing.T) {
 		go func() {
 			ready.Done()
 			<-start
-			result, err := store.SubmitInitial(ctx, caseID, initialread.Reader)
+			result, err := store.SubmitInitial(ctx, caseID, readerUserID(t, pool))
 			results <- outcome{result: result, err: err}
 		}()
 	}
@@ -388,7 +392,7 @@ func TestSubmitInitialRacesReplace(t *testing.T) {
 	t.Run("replace first is copied whole", func(t *testing.T) {
 		caseID := seedCase(t, pool, "1.2.3.4.7.106", "awaiting_read")
 		initial := []initialread.Mark{markA(), markB()}
-		if _, err := store.ReplaceInitialMarks(ctx, caseID, initialread.Reader, initial); err != nil {
+		if _, err := store.ReplaceInitialMarks(ctx, caseID, readerUserID(t, pool), initial); err != nil {
 			t.Fatalf("seed marks: %v", err)
 		}
 		initialID, _ := readIDByKind(t, runtime, caseID, "initial")
@@ -415,7 +419,7 @@ func TestSubmitInitialRacesReplace(t *testing.T) {
 		}
 		done := make(chan result, 1)
 		go func() {
-			out, err := store.SubmitInitial(ctx, caseID, initialread.Reader)
+			out, err := store.SubmitInitial(ctx, caseID, readerUserID(t, pool))
 			done <- result{out: out, err: err}
 		}()
 		select {
@@ -438,7 +442,7 @@ func TestSubmitInitialRacesReplace(t *testing.T) {
 		// The final copies the committed list, including the raced mark.
 		want := append(append([]initialread.Mark{}, initial...), initialread.Mark{
 			P1MM: []float64{5, 5, 5}, P2MM: []float64{6, 6, 6}, CenterMM: []float64{5.5, 5.5, 5.5},
-			DiameterMM: 1.5, Origin: initialread.Reader, ViewPlaneNormal: []float64{0, 0, 1}, Note: new("raced"),
+			DiameterMM: 1.5, Origin: initialread.OriginReader, ViewPlaneNormal: []float64{0, 0, 1}, Note: new("raced"),
 		})
 		assertMarksEqual(t, readMarks(t, runtime, got.out.FinalReadID), want, "raced final")
 	})
@@ -446,14 +450,14 @@ func TestSubmitInitialRacesReplace(t *testing.T) {
 	t.Run("submit first rejects the replace", func(t *testing.T) {
 		caseID := seedCase(t, pool, "1.2.3.4.7.107", "awaiting_read")
 		original := []initialread.Mark{markA()}
-		if _, err := store.ReplaceInitialMarks(ctx, caseID, initialread.Reader, original); err != nil {
+		if _, err := store.ReplaceInitialMarks(ctx, caseID, readerUserID(t, pool), original); err != nil {
 			t.Fatalf("seed marks: %v", err)
 		}
-		result, err := store.SubmitInitial(ctx, caseID, initialread.Reader)
+		result, err := store.SubmitInitial(ctx, caseID, readerUserID(t, pool))
 		if err != nil {
 			t.Fatalf("submit: %v", err)
 		}
-		if _, err := store.ReplaceInitialMarks(ctx, caseID, initialread.Reader, []initialread.Mark{markB()}); !errors.Is(err, initialread.ErrLocked) {
+		if _, err := store.ReplaceInitialMarks(ctx, caseID, readerUserID(t, pool), []initialread.Mark{markB()}); !errors.Is(err, initialread.ErrLocked) {
 			t.Fatalf("replace after submit = %v, want ErrLocked", err)
 		}
 		initialID, _ := readIDByKind(t, runtime, caseID, "initial")
@@ -551,13 +555,13 @@ func TestSubmitInitialRollback(t *testing.T) {
 			var initial []initialread.Mark
 			switch fixture.name {
 			case "copy_insert":
-				initial = []initialread.Mark{markA(), {P1MM: []float64{1, 1, 1}, P2MM: []float64{2, 2, 2}, CenterMM: []float64{1.5, 1.5, 1.5}, DiameterMM: 1, Origin: initialread.Reader, ViewPlaneNormal: []float64{0, 0, 1}, Note: new("lc1-11-copy-fixture")}}
+				initial = []initialread.Mark{markA(), {P1MM: []float64{1, 1, 1}, P2MM: []float64{2, 2, 2}, CenterMM: []float64{1.5, 1.5, 1.5}, DiameterMM: 1, Origin: initialread.OriginReader, ViewPlaneNormal: []float64{0, 0, 1}, Note: new("lc1-11-copy-fixture")}}
 			case "deferred_commit":
-				initial = []initialread.Mark{markA(), {P1MM: []float64{1, 1, 1}, P2MM: []float64{2, 2, 2}, CenterMM: []float64{1.5, 1.5, 1.5}, DiameterMM: 1, Origin: initialread.Reader, ViewPlaneNormal: []float64{0, 0, 1}, Note: new("lc1-11-deferred-fixture")}}
+				initial = []initialread.Mark{markA(), {P1MM: []float64{1, 1, 1}, P2MM: []float64{2, 2, 2}, CenterMM: []float64{1.5, 1.5, 1.5}, DiameterMM: 1, Origin: initialread.OriginReader, ViewPlaneNormal: []float64{0, 0, 1}, Note: new("lc1-11-deferred-fixture")}}
 			default:
 				initial = []initialread.Mark{markA(), markB()}
 			}
-			if _, err := store.ReplaceInitialMarks(ctx, caseID, initialread.Reader, initial); err != nil {
+			if _, err := store.ReplaceInitialMarks(ctx, caseID, readerUserID(t, pool), initial); err != nil {
 				t.Fatalf("seed marks: %v", err)
 			}
 			initialID, _ := readIDByKind(t, runtime, caseID, "initial")
@@ -565,7 +569,7 @@ func TestSubmitInitialRollback(t *testing.T) {
 			cleanup := installSubmitFailure(t, h, fixture.name, fixture.createTrigger, fixture.body)
 			defer cleanup()
 
-			_, err := store.SubmitInitial(ctx, caseID, initialread.Reader)
+			_, err := store.SubmitInitial(ctx, caseID, readerUserID(t, pool))
 			if !errors.Is(err, fixture.wantErr) {
 				t.Fatalf("error = %v, want %v", err, fixture.wantErr)
 			}
@@ -589,7 +593,7 @@ func TestSubmitInitialRollback(t *testing.T) {
 			if _, err := owner.Exec(ctx, `SELECT 1`); err != nil {
 				t.Fatalf("owner connection unusable: %v", err)
 			}
-			result, err := store.SubmitInitial(ctx, caseID, initialread.Reader)
+			result, err := store.SubmitInitial(ctx, caseID, readerUserID(t, pool))
 			if err != nil {
 				t.Fatalf("recovered submit: %v", err)
 			}
@@ -609,7 +613,7 @@ func TestSubmitInitialCanceledWhileWaiting(t *testing.T) {
 
 	caseID := seedCase(t, pool, "1.2.3.4.7.300", "awaiting_read")
 	initial := []initialread.Mark{markA()}
-	if _, err := store.ReplaceInitialMarks(ctx, caseID, initialread.Reader, initial); err != nil {
+	if _, err := store.ReplaceInitialMarks(ctx, caseID, readerUserID(t, pool), initial); err != nil {
 		t.Fatalf("seed marks: %v", err)
 	}
 	initialID, _ := readIDByKind(t, runtime, caseID, "initial")
@@ -625,7 +629,7 @@ func TestSubmitInitialCanceledWhileWaiting(t *testing.T) {
 
 	canceled, cancel := context.WithTimeout(ctx, 300*time.Millisecond)
 	defer cancel()
-	if _, err := store.SubmitInitial(canceled, caseID, initialread.Reader); !errors.Is(err, initialread.ErrDependency) {
+	if _, err := store.SubmitInitial(canceled, caseID, readerUserID(t, pool)); !errors.Is(err, initialread.ErrDependency) {
 		t.Fatalf("canceled submit error = %v, want ErrDependency", err)
 	}
 	if readLockedAt(t, runtime, initialID) != nil {
@@ -641,7 +645,7 @@ func TestSubmitInitialCanceledWhileWaiting(t *testing.T) {
 	if err := blocker.Commit(ctx); err != nil {
 		t.Fatalf("blocker commit: %v", err)
 	}
-	result, err := store.SubmitInitial(ctx, caseID, initialread.Reader)
+	result, err := store.SubmitInitial(ctx, caseID, readerUserID(t, pool))
 	if err != nil {
 		t.Fatalf("submit after release: %v (connection not released?)", err)
 	}

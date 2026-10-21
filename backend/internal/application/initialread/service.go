@@ -22,25 +22,37 @@ func (s *Service) GetCase(ctx context.Context, caseID int64) (Case, error) {
 	return s.store.GetCase(ctx, caseID)
 }
 
-// GetInitial returns the fixed-reader initial read, creating an empty draft when
-// the case is still awaiting its read and none exists.
-func (s *Service) GetInitial(ctx context.Context, caseID int64) (Read, error) {
-	return s.store.GetOrCreateInitial(ctx, caseID, Reader)
+// GetInitial returns the authenticated owner's initial read, creating an empty
+// draft when the case is still awaiting its read and none exists. A read owned
+// by another user is forbidden.
+func (s *Service) GetInitial(ctx context.Context, caseID, userID int64) (Read, error) {
+	if userID <= 0 {
+		return Read{}, fail(ErrInvalid, "a valid user is required")
+	}
+	return s.store.GetOrCreateInitial(ctx, caseID, userID)
 }
 
 // ReplaceMarks validates the whole list and then replaces the initial read's
-// marks. Nothing is persisted unless every mark is valid.
-func (s *Service) ReplaceMarks(ctx context.Context, caseID int64, marks []Mark) ([]Mark, error) {
+// marks. Nothing is persisted unless every mark is valid and the caller owns the
+// read.
+func (s *Service) ReplaceMarks(ctx context.Context, caseID, userID int64, marks []Mark) ([]Mark, error) {
+	if userID <= 0 {
+		return nil, fail(ErrInvalid, "a valid user is required")
+	}
 	if err := validateMarks(marks); err != nil {
 		return nil, err
 	}
-	return s.store.ReplaceInitialMarks(ctx, caseID, Reader, marks)
+	return s.store.ReplaceInitialMarks(ctx, caseID, userID, marks)
 }
 
-// SubmitInitial locks the fixed-reader initial read and creates its editable
-// final copy in one transaction. It never waits for or reveals AI state.
-func (s *Service) SubmitInitial(ctx context.Context, caseID int64) (SubmitResult, error) {
-	return s.store.SubmitInitial(ctx, caseID, Reader)
+// SubmitInitial locks the authenticated owner's initial read and creates its
+// editable final copy in one transaction. It never waits for or reveals AI
+// state.
+func (s *Service) SubmitInitial(ctx context.Context, caseID, userID int64) (SubmitResult, error) {
+	if userID <= 0 {
+		return SubmitResult{}, fail(ErrInvalid, "a valid user is required")
+	}
+	return s.store.SubmitInitial(ctx, caseID, userID)
 }
 
 // validateMarks rejects the whole list on the first invalid mark. It rechecks

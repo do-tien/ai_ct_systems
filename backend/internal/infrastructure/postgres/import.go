@@ -80,11 +80,20 @@ func (s *ImportStore) CreateImportedCase(ctx context.Context, input caseimport.I
 	if err != nil {
 		return 0, caseimport.Fail(caseimport.ErrDependency, "cannot encode the import audit detail")
 	}
+	actor := input.ActorDisplayName
+	if actor == "" {
+		// The use case carries only the authenticated user id; resolve the same
+		// user's display-name snapshot inside this transaction.
+		if err := tx.QueryRow(ctx, `SELECT display_name FROM users WHERE id = $1`, input.ActorUserID).Scan(&actor); err != nil {
+			return 0, classifyWrite(ctx, err)
+		}
+	}
 	if _, err := queries.AppendEvent(ctx, lc1db.AppendEventParams{
-		CaseID: pgtype.Int8{Int64: created.ID, Valid: true},
-		Actor:  "importer",
-		Action: "case_imported",
-		Detail: detail,
+		CaseID:      pgtype.Int8{Int64: created.ID, Valid: true},
+		Actor:       actor,
+		Action:      "case_imported",
+		Detail:      detail,
+		ActorUserID: pgtype.Int8{Int64: input.ActorUserID, Valid: input.ActorUserID > 0},
 	}); err != nil {
 		return 0, classifyWrite(ctx, err)
 	}

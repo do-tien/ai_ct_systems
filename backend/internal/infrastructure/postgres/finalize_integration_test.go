@@ -70,7 +70,7 @@ func TestFinalize(t *testing.T) {
 				}
 				seedJob(t, pool, caseID, status, result, nil)
 
-				outcome, err := store.Finalize(ctx, caseID, initialread.Reader)
+				outcome, err := store.Finalize(ctx, caseID, readerUserID(t, pool))
 				if err != nil {
 					t.Fatalf("Finalize: %v", err)
 				}
@@ -105,7 +105,7 @@ func TestFinalize(t *testing.T) {
 		awaiting := seedCase(t, pool, series(10), "awaiting_read")
 		seedInitialRead(t, pool, awaiting)
 		seedJob(t, pool, awaiting, "queued", nil, nil)
-		if _, err := store.Finalize(ctx, awaiting, initialread.Reader); !errors.Is(err, finalread.ErrConflict) {
+		if _, err := store.Finalize(ctx, awaiting, readerUserID(t, pool)); !errors.Is(err, finalread.ErrConflict) {
 			t.Fatalf("prelock error = %v, want ErrConflict", err)
 		}
 
@@ -116,13 +116,13 @@ func TestFinalize(t *testing.T) {
 			t.Fatalf("lock initial: %v", err)
 		}
 		seedJob(t, pool, noFinal, "queued", nil, nil)
-		if _, err := store.Finalize(ctx, noFinal, initialread.Reader); !errors.Is(err, finalread.ErrConflict) {
+		if _, err := store.Finalize(ctx, noFinal, readerUserID(t, pool)); !errors.Is(err, finalread.ErrConflict) {
 			t.Fatalf("missing final error = %v, want ErrConflict", err)
 		}
 
 		// Missing job.
 		noJob, _, _ := seedLockedCase(t, pool, series(12))
-		if _, err := store.Finalize(ctx, noJob, initialread.Reader); !errors.Is(err, finalread.ErrConflict) {
+		if _, err := store.Finalize(ctx, noJob, readerUserID(t, pool)); !errors.Is(err, finalread.ErrConflict) {
 			t.Fatalf("missing job error = %v, want ErrConflict", err)
 		}
 
@@ -132,17 +132,17 @@ func TestFinalize(t *testing.T) {
 		if _, err := pool.Exec(ctx, `UPDATE reads SET locked_at = now() WHERE id = $1`, finalID); err != nil {
 			t.Fatalf("lock final: %v", err)
 		}
-		if _, err := store.Finalize(ctx, lockedFinal, initialread.Reader); !errors.Is(err, finalread.ErrConflict) {
+		if _, err := store.Finalize(ctx, lockedFinal, readerUserID(t, pool)); !errors.Is(err, finalread.ErrConflict) {
 			t.Fatalf("locked final error = %v, want ErrConflict", err)
 		}
 
 		// Repeat finalize.
 		repeat, _, _ := seedLockedCase(t, pool, series(14))
 		seedJob(t, pool, repeat, "queued", nil, nil)
-		if _, err := store.Finalize(ctx, repeat, initialread.Reader); err != nil {
+		if _, err := store.Finalize(ctx, repeat, readerUserID(t, pool)); err != nil {
 			t.Fatalf("first finalize: %v", err)
 		}
-		if _, err := store.Finalize(ctx, repeat, initialread.Reader); !errors.Is(err, finalread.ErrConflict) {
+		if _, err := store.Finalize(ctx, repeat, readerUserID(t, pool)); !errors.Is(err, finalread.ErrConflict) {
 			t.Fatalf("repeat error = %v, want ErrConflict", err)
 		}
 	})
@@ -165,7 +165,7 @@ func TestFinalize(t *testing.T) {
 					`RAISE EXCEPTION 'lc1-13 finalize fixture';`)
 				defer cleanup()
 
-				if _, err := store.Finalize(ctx, caseID, initialread.Reader); !errors.Is(err, finalread.ErrDependency) {
+				if _, err := store.Finalize(ctx, caseID, readerUserID(t, pool)); !errors.Is(err, finalread.ErrDependency) {
 					t.Fatalf("error = %v, want ErrDependency", err)
 				}
 
@@ -209,7 +209,7 @@ func TestFinalizeConcurrency(t *testing.T) {
 			go func(slot int) {
 				defer wait.Done()
 				<-start
-				_, results[slot] = store.Finalize(ctx, caseID, initialread.Reader)
+				_, results[slot] = store.Finalize(ctx, caseID, readerUserID(t, pool))
 			}(index)
 		}
 		close(start)
@@ -247,7 +247,7 @@ func TestFinalizeConcurrency(t *testing.T) {
 			}},
 			CandidateDecisions: []finalread.Decision{{CandidateID: "c1", Decision: finalread.DecisionAccepted}},
 		}
-		if _, err := service.ReplaceFinal(ctx, caseID, prior); err != nil {
+		if _, err := service.ReplaceFinal(ctx, caseID, readerUserID(t, pool), prior); err != nil {
 			t.Fatalf("seed prior generation: %v", err)
 		}
 		racing := finalread.Replacement{
@@ -276,12 +276,12 @@ func TestFinalizeConcurrency(t *testing.T) {
 		go func() {
 			defer wait.Done()
 			<-start
-			_, finalizeErr = store.Finalize(ctx, caseID, initialread.Reader)
+			_, finalizeErr = store.Finalize(ctx, caseID, readerUserID(t, pool))
 		}()
 		go func() {
 			defer wait.Done()
 			<-start
-			_, putErr = service.ReplaceFinal(ctx, caseID, racing)
+			_, putErr = service.ReplaceFinal(ctx, caseID, readerUserID(t, pool), racing)
 		}()
 		close(start)
 		// Both writers must be observed blocked behind the holder before the
@@ -343,7 +343,7 @@ func TestFinalizeConcurrency(t *testing.T) {
 
 		// A coherent generation exists before the writers start, so a reader
 		// that never reads cannot pass vacuously.
-		if _, err := service.ReplaceFinal(ctx, caseID, generation(1)); err != nil {
+		if _, err := service.ReplaceFinal(ctx, caseID, readerUserID(t, pool), generation(1)); err != nil {
 			t.Fatalf("seed generation: %v", err)
 		}
 
@@ -355,7 +355,7 @@ func TestFinalizeConcurrency(t *testing.T) {
 			defer wait.Done()
 			defer close(stop) // always released, even on writer error
 			for index := 0; index < 40; index++ {
-				if _, err := service.ReplaceFinal(ctx, caseID, generation(1+index%2)); err != nil && !errors.Is(err, finalread.ErrLocked) {
+				if _, err := service.ReplaceFinal(ctx, caseID, readerUserID(t, pool), generation(1+index%2)); err != nil && !errors.Is(err, finalread.ErrLocked) {
 					t.Errorf("ReplaceFinal: %v", err)
 					return
 				}
@@ -375,7 +375,7 @@ func TestFinalizeConcurrency(t *testing.T) {
 					return
 				default:
 				}
-				read, err := store.GetFinal(ctx, caseID, initialread.Reader)
+				read, err := store.GetFinal(ctx, caseID, readerUserID(t, pool))
 				if err != nil {
 					t.Errorf("GetFinal: %v", err)
 					return
@@ -439,8 +439,8 @@ func TestFinalizeLateAI(t *testing.T) {
 			t.Fatalf("lock initial read: %v", err)
 		}
 		if err := pool.QueryRow(ctx,
-			`INSERT INTO reads (case_id, kind, reader) VALUES ($1, 'final', $2) RETURNING id`,
-			caseID, initialread.Reader).Scan(&finalID); err != nil {
+			`INSERT INTO reads (case_id, kind, reader_user_id) VALUES ($1, 'final', $2) RETURNING id`,
+			caseID, readerUserID(t, pool)).Scan(&finalID); err != nil {
 			t.Fatalf("seed final read: %v", err)
 		}
 		insertMark(t, finalID, markB())
@@ -492,7 +492,7 @@ func TestFinalizeLateAI(t *testing.T) {
 			t.Fatalf("Claim: %v %v", ok, err)
 		}
 
-		outcome, err := store.Finalize(ctx, caseID, initialread.Reader)
+		outcome, err := store.Finalize(ctx, caseID, readerUserID(t, pool))
 		if err != nil {
 			t.Fatalf("Finalize: %v", err)
 		}
@@ -524,7 +524,7 @@ func TestFinalizeLateAI(t *testing.T) {
 			t.Fatalf("Claim: %v %v", ok, err)
 		}
 
-		outcome, err := store.Finalize(ctx, caseID, initialread.Reader)
+		outcome, err := store.Finalize(ctx, caseID, readerUserID(t, pool))
 		if err != nil {
 			t.Fatalf("Finalize: %v", err)
 		}
@@ -558,7 +558,7 @@ func TestFinalizeLateAI(t *testing.T) {
 		if err := job.Succeed(ctx, jobID, syntheticAISuccess(t, series(2), "1.2.3.4.7", "c1")); err != nil {
 			t.Fatalf("Succeed: %v", err)
 		}
-		outcome, err := store.Finalize(ctx, caseID, initialread.Reader)
+		outcome, err := store.Finalize(ctx, caseID, readerUserID(t, pool))
 		if err != nil {
 			t.Fatalf("Finalize: %v", err)
 		}
@@ -591,7 +591,7 @@ func TestFinalizeCanceledUnderLock(t *testing.T) {
 
 	waitCtx, cancel := context.WithTimeout(ctx, 1500*time.Millisecond)
 	defer cancel()
-	if _, err := store.Finalize(waitCtx, caseID, initialread.Reader); !errors.Is(err, finalread.ErrDependency) {
+	if _, err := store.Finalize(waitCtx, caseID, readerUserID(t, pool)); !errors.Is(err, finalread.ErrDependency) {
 		t.Fatalf("error = %v, want ErrDependency", err)
 	}
 	if err := tx.Rollback(ctx); err != nil {
@@ -609,7 +609,7 @@ func TestFinalizeCanceledUnderLock(t *testing.T) {
 	if len(caseFinalizedEvents(t, runtime, caseID)) != 0 {
 		t.Fatalf("canceled finalize recorded an event")
 	}
-	if _, err := store.GetFinal(ctx, caseID, initialread.Reader); err != nil {
+	if _, err := store.GetFinal(ctx, caseID, readerUserID(t, pool)); err != nil {
 		t.Fatalf("pool unusable after cancellation: %v", err)
 	}
 }

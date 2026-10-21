@@ -28,11 +28,30 @@ func createCase(t *testing.T, q *lc1db.Queries, seriesUID string) lc1db.Case {
 	return row
 }
 
-func createRead(t *testing.T, q *lc1db.Queries, caseID int64, kind string) lc1db.Read {
+// createUser inserts one user through the generated query so tests exercise the
+// committed projection. The lookup value is synthetic and never a real PIN.
+func createUser(t *testing.T, q *lc1db.Queries, name string) lc1db.CreateUserRow {
 	t.Helper()
-	row, err := q.CreateRead(context.Background(), lc1db.CreateReadParams{CaseID: caseID, Kind: kind, Reader: "dr-synthetic"})
+	row, err := q.CreateUser(context.Background(), lc1db.CreateUserParams{
+		DisplayName: name,
+		PinLookup:   randomBytes(t, 32),
+		PinHash:     "$argon2id$v=19$synthetic",
+	})
+	if err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	return row
+}
+
+func createRead(t *testing.T, q *lc1db.Queries, caseID int64, kind string) lc1db.CreateReadRow {
+	t.Helper()
+	owner := createUser(t, q, "dr-synthetic")
+	row, err := q.CreateRead(context.Background(), lc1db.CreateReadParams{CaseID: caseID, Kind: kind, ReaderUserID: owner.ID})
 	if err != nil {
 		t.Fatalf("CreateRead: %v", err)
+	}
+	if row.ReaderUserID != owner.ID || row.ReaderDisplayName != owner.DisplayName {
+		t.Fatalf("CreateRead projection = %+v, want owner %d/%q", row, owner.ID, owner.DisplayName)
 	}
 	return row
 }
@@ -112,6 +131,13 @@ func TestLC1StorageQueries(t *testing.T) {
 		}
 		if got.SeriesInstanceUid != "1.2.3.4.21" || got.Status != "awaiting_read" {
 			t.Fatalf("case = %+v", got)
+		}
+		stored, err := q.GetRead(ctx, lc1db.GetReadParams{CaseID: row.ID, Kind: "initial"})
+		if err != nil {
+			t.Fatalf("GetRead: %v", err)
+		}
+		if stored.ReaderUserID != read.ReaderUserID || stored.ReaderDisplayName != read.ReaderDisplayName {
+			t.Fatalf("stored read = %+v, want owner %d", stored, read.ReaderUserID)
 		}
 		marks, err := q.ListMarks(ctx, read.ID)
 		if err != nil {

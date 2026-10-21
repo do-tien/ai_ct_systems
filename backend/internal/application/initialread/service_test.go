@@ -19,7 +19,7 @@ type recordingStore struct {
 	readResult Read
 	readErr    error
 	readCalls  int
-	readerSeen []string
+	userSeen   []int64
 
 	replaceResult []Mark
 	replaceErr    error
@@ -35,22 +35,22 @@ func (s *recordingStore) GetCase(context.Context, int64) (Case, error) {
 	return s.caseResult, s.caseErr
 }
 
-func (s *recordingStore) GetOrCreateInitial(_ context.Context, _ int64, reader string) (Read, error) {
+func (s *recordingStore) GetOrCreateInitial(_ context.Context, _ int64, userID int64) (Read, error) {
 	s.readCalls++
-	s.readerSeen = append(s.readerSeen, reader)
+	s.userSeen = append(s.userSeen, userID)
 	return s.readResult, s.readErr
 }
 
-func (s *recordingStore) ReplaceInitialMarks(_ context.Context, _ int64, reader string, marks []Mark) ([]Mark, error) {
+func (s *recordingStore) ReplaceInitialMarks(_ context.Context, _ int64, userID int64, marks []Mark) ([]Mark, error) {
 	s.replaceCalls++
-	s.readerSeen = append(s.readerSeen, reader)
+	s.userSeen = append(s.userSeen, userID)
 	s.replaced = append(s.replaced, marks)
 	return s.replaceResult, s.replaceErr
 }
 
-func (s *recordingStore) SubmitInitial(_ context.Context, _ int64, reader string) (SubmitResult, error) {
+func (s *recordingStore) SubmitInitial(_ context.Context, _ int64, userID int64) (SubmitResult, error) {
 	s.submitCalls++
-	s.readerSeen = append(s.readerSeen, reader)
+	s.userSeen = append(s.userSeen, userID)
 	return s.submitResult, s.submitErr
 }
 
@@ -238,7 +238,7 @@ func TestValidateInitialMarks(t *testing.T) {
 			store := &recordingStore{}
 			service := NewService(store)
 
-			_, err := service.ReplaceMarks(context.Background(), 1, test.marks)
+			_, err := service.ReplaceMarks(context.Background(), 1, 1, test.marks)
 
 			if !test.accepted {
 				if !errors.Is(err, ErrInvalid) {
@@ -269,7 +269,7 @@ func TestReplaceRejectsEntireInvalidList(t *testing.T) {
 	store := &recordingStore{}
 	service := NewService(store)
 
-	_, err := service.ReplaceMarks(context.Background(), 1, []Mark{validMark(), invalid})
+	_, err := service.ReplaceMarks(context.Background(), 1, 1, []Mark{validMark(), invalid})
 	if !errors.Is(err, ErrInvalid) {
 		t.Fatalf("error = %v, want ErrInvalid", err)
 	}
@@ -278,37 +278,76 @@ func TestReplaceRejectsEntireInvalidList(t *testing.T) {
 	}
 }
 
-func TestGetInitialUsesFixedReader(t *testing.T) {
-	store := &recordingStore{readResult: Read{ID: 7, CaseID: 3, Kind: "initial", Reader: Reader}}
+func TestGetInitialForwardsUser(t *testing.T) {
+	store := &recordingStore{readResult: Read{ID: 7, CaseID: 3, Kind: "initial", Reader: "Doctor A"}}
 	service := NewService(store)
 
-	read, err := service.GetInitial(context.Background(), 3)
+	read, err := service.GetInitial(context.Background(), 3, 17)
 	if err != nil {
 		t.Fatalf("GetInitial: %v", err)
 	}
 	if read.ID != 7 {
 		t.Fatalf("read id = %d, want 7", read.ID)
 	}
-	if len(store.readerSeen) != 1 || store.readerSeen[0] != Reader {
-		t.Fatalf("reader passed to store = %v, want [%q]", store.readerSeen, Reader)
+	if len(store.userSeen) != 1 || store.userSeen[0] != 17 {
+		t.Fatalf("user passed to store = %v, want [17]", store.userSeen)
 	}
 }
 
-func TestSubmitInitialUsesFixedReader(t *testing.T) {
+func TestReplaceMarksForwardsUser(t *testing.T) {
+	store := &recordingStore{}
+	service := NewService(store)
+
+	if _, err := service.ReplaceMarks(context.Background(), 3, 42, []Mark{validMark()}); err != nil {
+		t.Fatalf("ReplaceMarks: %v", err)
+	}
+	if len(store.userSeen) != 1 || store.userSeen[0] != 42 {
+		t.Fatalf("user passed to store = %v, want [42]", store.userSeen)
+	}
+}
+
+func TestSubmitInitialForwardsUser(t *testing.T) {
 	locked := time.Date(2026, 10, 11, 8, 0, 0, 0, time.UTC)
 	store := &recordingStore{submitResult: SubmitResult{Status: StatusInitialLocked, LockedAt: locked, FinalReadID: 42}}
 
-	result, err := NewService(store).SubmitInitial(context.Background(), 9)
+	result, err := NewService(store).SubmitInitial(context.Background(), 9, 23)
 	if err != nil {
 		t.Fatalf("SubmitInitial: %v", err)
 	}
 	if result.Status != StatusInitialLocked || result.FinalReadID != 42 || !result.LockedAt.Equal(locked) {
 		t.Fatalf("result = %+v", result)
 	}
-	if len(store.readerSeen) != 1 || store.readerSeen[0] != Reader {
-		t.Fatalf("reader passed to store = %v, want [%q]", store.readerSeen, Reader)
+	if len(store.userSeen) != 1 || store.userSeen[0] != 23 {
+		t.Fatalf("user passed to store = %v, want [23]", store.userSeen)
 	}
 	if store.submitCalls != 1 {
 		t.Fatalf("submit calls = %d, want 1", store.submitCalls)
+	}
+}
+
+func TestInitialReadRejectsInvalidUser(t *testing.T) {
+	for _, userID := range []int64{0, -1} {
+		store := &recordingStore{}
+		service := NewService(store)
+		if _, err := service.GetInitial(context.Background(), 3, userID); !errors.Is(err, ErrInvalid) {
+			t.Fatalf("GetInitial user %d error = %v, want ErrInvalid", userID, err)
+		}
+		if _, err := service.ReplaceMarks(context.Background(), 3, userID, []Mark{}); !errors.Is(err, ErrInvalid) {
+			t.Fatalf("ReplaceMarks user %d error = %v, want ErrInvalid", userID, err)
+		}
+		if _, err := service.SubmitInitial(context.Background(), 3, userID); !errors.Is(err, ErrInvalid) {
+			t.Fatalf("SubmitInitial user %d error = %v, want ErrInvalid", userID, err)
+		}
+		if store.readCalls != 0 || store.replaceCalls != 0 || store.submitCalls != 0 {
+			t.Fatalf("invalid user %d reached the store: %+v", userID, store.userSeen)
+		}
+	}
+}
+
+func TestInitialReadPropagatesForbidden(t *testing.T) {
+	store := &recordingStore{readErr: fail(ErrForbidden, "assigned")}
+	service := NewService(store)
+	if _, err := service.GetInitial(context.Background(), 3, 17); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("error = %v, want ErrForbidden", err)
 	}
 }

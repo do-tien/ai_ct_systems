@@ -199,9 +199,9 @@ func TestLC1FinalImmutabilityMigration(t *testing.T) {
 
 	owner := h.owner(t)
 	caseID := seedCaseConn(t, owner, "1.2.3.4.6.6003", "initial_locked")
-	initialID := seedReadKind(t, owner, caseID, "initial")
+	initialID := seedReadKindWithReader(t, owner, caseID, "initial", "reader")
 	lockReadDirect(t, owner, initialID)
-	finalID := seedReadKind(t, owner, caseID, "final")
+	finalID := seedReadKindWithReader(t, owner, caseID, "final", "reader")
 	insertDecisionDirect(t, owner, finalID, "c1", "accepted", nil)
 	finalizeCaseDirect(t, owner, caseID, finalID)
 

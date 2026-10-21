@@ -23,30 +23,43 @@ func NewService(store Store) *Service {
 }
 
 // GetAI returns the state-specific AI projection of the case. Before the initial
-// read is locked the adapter returns ErrForbidden; the service never touches AI
-// tables itself.
-func (s *Service) GetAI(ctx context.Context, caseID int64) (AI, error) {
-	return s.store.GetAI(ctx, caseID, initialread.Reader)
+// read is locked the adapter returns ErrForbidden; a case owned by another user
+// is ErrAssignedToAnotherUser. The service never touches AI tables itself.
+func (s *Service) GetAI(ctx context.Context, caseID, userID int64) (AI, error) {
+	if userID <= 0 {
+		return AI{}, fail(ErrInvalid, "a valid user is required")
+	}
+	return s.store.GetAI(ctx, caseID, userID)
 }
 
 // GetFinal returns the editable final read without creating or copying one.
-func (s *Service) GetFinal(ctx context.Context, caseID int64) (Read, error) {
-	return s.store.GetFinal(ctx, caseID, initialread.Reader)
+func (s *Service) GetFinal(ctx context.Context, caseID, userID int64) (Read, error) {
+	if userID <= 0 {
+		return Read{}, fail(ErrInvalid, "a valid user is required")
+	}
+	return s.store.GetFinal(ctx, caseID, userID)
 }
 
 // ReplaceFinal validates the whole replacement and then persists both lists
-// atomically. Nothing is persisted unless every mark and decision is valid;
-// candidate membership is enforced by the transactional store.
-func (s *Service) ReplaceFinal(ctx context.Context, caseID int64, value Replacement) (Read, error) {
+// atomically. Nothing is persisted unless every mark and decision is valid and
+// the caller owns the read; candidate membership is enforced by the
+// transactional store.
+func (s *Service) ReplaceFinal(ctx context.Context, caseID, userID int64, value Replacement) (Read, error) {
+	if userID <= 0 {
+		return Read{}, fail(ErrInvalid, "a valid user is required")
+	}
 	if err := validateReplacement(value); err != nil {
 		return Read{}, err
 	}
-	return s.store.ReplaceFinal(ctx, caseID, initialread.Reader, value)
+	return s.store.ReplaceFinal(ctx, caseID, userID, value)
 }
 
 // Finalize completes the case without waiting for AI to finish.
-func (s *Service) Finalize(ctx context.Context, caseID int64) (FinalizeResult, error) {
-	return s.store.Finalize(ctx, caseID, initialread.Reader)
+func (s *Service) Finalize(ctx context.Context, caseID, userID int64) (FinalizeResult, error) {
+	if userID <= 0 {
+		return FinalizeResult{}, fail(ErrInvalid, "a valid user is required")
+	}
+	return s.store.Finalize(ctx, caseID, userID)
 }
 
 // validateReplacement rejects the whole replacement on the first invalid member.

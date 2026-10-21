@@ -18,7 +18,12 @@ const (
 	studyA  = "study-a"
 	studyB  = "study-b"
 	uidSetA = "1.2.840.113619.2.55.3.604688.200.1"
-	uidSetB = "1.2.840.113619.2.55.3.604688.200.9"
+
+	// uploadOwnerID is the authenticated owner every positive upload path uses.
+	uploadOwnerID = int64(41)
+	// uploadOtherUserID is a different authenticated user: never the owner.
+	uploadOtherUserID = int64(42)
+	uidSetB           = "1.2.840.113619.2.55.3.604688.200.9"
 )
 
 // stagedFile writes one file into a temp directory and describes it the way the
@@ -82,7 +87,7 @@ func TestPrepareGroupsSeriesIntoOptions(t *testing.T) {
 	store := &fakeStore{}
 	service := caseimport.NewService(archive, store)
 
-	session, err := service.Prepare(context.Background(), files(t, 4), 2)
+	session, err := service.Prepare(context.Background(), files(t, 4), 2, uploadOwnerID)
 	if err != nil {
 		t.Fatalf("prepare: %v", err)
 	}
@@ -117,7 +122,7 @@ func TestPrepareMarksUnusableSeries(t *testing.T) {
 	}
 	service := caseimport.NewService(archive, &fakeStore{})
 
-	session, err := service.Prepare(context.Background(), files(t, 2), 0)
+	session, err := service.Prepare(context.Background(), files(t, 2), 0, uploadOwnerID)
 	if err != nil {
 		t.Fatalf("prepare: %v", err)
 	}
@@ -134,7 +139,7 @@ func TestPrepareMarksSingleSliceUnsuitable(t *testing.T) {
 	}
 	service := caseimport.NewService(archive, &fakeStore{})
 
-	session, err := service.Prepare(context.Background(), files(t, 1), 0)
+	session, err := service.Prepare(context.Background(), files(t, 1), 0, uploadOwnerID)
 	if err != nil {
 		t.Fatalf("prepare: %v", err)
 	}
@@ -146,7 +151,7 @@ func TestPrepareMarksSingleSliceUnsuitable(t *testing.T) {
 func TestPrepareRejectsUnsupportedFile(t *testing.T) {
 	archive := &fakeArchive{failAt: 1, failWith: caseimport.Fail(caseimport.ErrInvalidInput, "orthanc upload rejected with status 400")}
 	service := caseimport.NewService(archive, &fakeStore{})
-	if _, err := service.Prepare(context.Background(), files(t, 2), 0); !errors.Is(err, caseimport.ErrInvalidInput) {
+	if _, err := service.Prepare(context.Background(), files(t, 2), 0, uploadOwnerID); !errors.Is(err, caseimport.ErrInvalidInput) {
 		t.Fatalf("want ErrInvalidInput, got %v", err)
 	}
 }
@@ -169,11 +174,11 @@ func TestPrepareIsSingleFlight(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		_, err := service.Prepare(context.Background(), files(t, 2), 0)
+		_, err := service.Prepare(context.Background(), files(t, 2), 0, uploadOwnerID)
 		done <- err
 	}()
 	<-started
-	if _, err := service.Prepare(context.Background(), files(t, 2), 0); !errors.Is(err, caseimport.ErrBusy) {
+	if _, err := service.Prepare(context.Background(), files(t, 2), 0, uploadOwnerID); !errors.Is(err, caseimport.ErrBusy) {
 		t.Fatalf("want ErrBusy during an in-flight prepare, got %v", err)
 	}
 	close(release)
@@ -190,10 +195,10 @@ func TestPrepareEnforcesSessionCapacity(t *testing.T) {
 	}
 	service := caseimport.NewServiceWithLimits(archive, &fakeStore{}, caseimport.Limits{MaxSessions: 1, MaxSeries: 64, SessionTTL: time.Minute})
 
-	if _, err := service.Prepare(context.Background(), files(t, 2), 0); err != nil {
+	if _, err := service.Prepare(context.Background(), files(t, 2), 0, uploadOwnerID); err != nil {
 		t.Fatalf("first prepare: %v", err)
 	}
-	if _, err := service.Prepare(context.Background(), files(t, 2), 0); !errors.Is(err, caseimport.ErrCapacity) {
+	if _, err := service.Prepare(context.Background(), files(t, 2), 0, uploadOwnerID); !errors.Is(err, caseimport.ErrCapacity) {
 		t.Fatalf("want ErrCapacity, got %v", err)
 	}
 }
@@ -207,7 +212,7 @@ func preparedSession(t *testing.T) (*caseimport.Service, *fakeArchive, *fakeStor
 	}
 	store := &fakeStore{result: 55}
 	service := caseimport.NewService(archive, store)
-	session, err := service.Prepare(context.Background(), files(t, 2), 0)
+	session, err := service.Prepare(context.Background(), files(t, 2), 0, uploadOwnerID)
 	if err != nil {
 		t.Fatalf("prepare: %v", err)
 	}
@@ -218,14 +223,14 @@ func TestConfirmCreatesOneCaseAndIsIdempotent(t *testing.T) {
 	service, _, store, session := preparedSession(t)
 	key := session.Series[0].ID
 
-	first, err := service.Confirm(context.Background(), session.ID, key)
+	first, err := service.Confirm(context.Background(), session.ID, key, uploadOwnerID)
 	if err != nil {
 		t.Fatalf("confirm: %v", err)
 	}
 	if first.CaseID != 55 || first.Existing || first.InstanceCount != 2 {
 		t.Fatalf("unexpected result: %+v", first)
 	}
-	second, err := service.Confirm(context.Background(), session.ID, key)
+	second, err := service.Confirm(context.Background(), session.ID, key, uploadOwnerID)
 	if err != nil {
 		t.Fatalf("repeat confirm: %v", err)
 	}
@@ -239,10 +244,10 @@ func TestConfirmCreatesOneCaseAndIsIdempotent(t *testing.T) {
 
 func TestConfirmRejectsAnotherSeriesAfterConfirm(t *testing.T) {
 	service, _, _, session := preparedSession(t)
-	if _, err := service.Confirm(context.Background(), session.ID, session.Series[0].ID); err != nil {
+	if _, err := service.Confirm(context.Background(), session.ID, session.Series[0].ID, uploadOwnerID); err != nil {
 		t.Fatalf("confirm: %v", err)
 	}
-	if _, err := service.Confirm(context.Background(), session.ID, "some-other-key"); !errors.Is(err, caseimport.ErrAlreadyConfirmed) {
+	if _, err := service.Confirm(context.Background(), session.ID, "some-other-key", uploadOwnerID); !errors.Is(err, caseimport.ErrAlreadyConfirmed) {
 		t.Fatalf("want ErrAlreadyConfirmed, got %v", err)
 	}
 }
@@ -252,7 +257,7 @@ func TestConfirmReturnsExistingCase(t *testing.T) {
 	store.existingFound = true
 	store.existingID = 91
 
-	result, err := service.Confirm(context.Background(), session.ID, session.Series[0].ID)
+	result, err := service.Confirm(context.Background(), session.ID, session.Series[0].ID, uploadOwnerID)
 	if err != nil {
 		t.Fatalf("confirm: %v", err)
 	}
@@ -270,7 +275,7 @@ func TestConfirmResolvesDuplicateUniqueViolation(t *testing.T) {
 	store.existingFound = true
 	store.existingID = 12
 
-	result, err := service.Confirm(context.Background(), session.ID, session.Series[0].ID)
+	result, err := service.Confirm(context.Background(), session.ID, session.Series[0].ID, uploadOwnerID)
 	if err != nil {
 		t.Fatalf("confirm: %v", err)
 	}
@@ -281,10 +286,10 @@ func TestConfirmResolvesDuplicateUniqueViolation(t *testing.T) {
 
 func TestConfirmRejectsUnknownKeyAndUpload(t *testing.T) {
 	service, _, _, session := preparedSession(t)
-	if _, err := service.Confirm(context.Background(), session.ID, "no-such-key"); !errors.Is(err, caseimport.ErrInvalidInput) {
+	if _, err := service.Confirm(context.Background(), session.ID, "no-such-key", uploadOwnerID); !errors.Is(err, caseimport.ErrInvalidInput) {
 		t.Fatalf("want ErrInvalidInput, got %v", err)
 	}
-	if _, err := service.Confirm(context.Background(), "no-such-upload", session.Series[0].ID); !errors.Is(err, caseimport.ErrNotFound) {
+	if _, err := service.Confirm(context.Background(), "no-such-upload", session.Series[0].ID, uploadOwnerID); !errors.Is(err, caseimport.ErrNotFound) {
 		t.Fatalf("want ErrNotFound, got %v", err)
 	}
 }
@@ -293,10 +298,10 @@ func TestGetReconcilesUncertainConfirm(t *testing.T) {
 	service, _, store, session := preparedSession(t)
 	store.failure = caseimport.Fail(caseimport.ErrCommitOutcomeUnknown, "commit outcome unknown")
 
-	if _, err := service.Confirm(context.Background(), session.ID, session.Series[0].ID); !errors.Is(err, caseimport.ErrCommitOutcomeUnknown) {
+	if _, err := service.Confirm(context.Background(), session.ID, session.Series[0].ID, uploadOwnerID); !errors.Is(err, caseimport.ErrCommitOutcomeUnknown) {
 		t.Fatalf("want ErrCommitOutcomeUnknown, got %v", err)
 	}
-	view, err := service.Get(context.Background(), session.ID)
+	view, err := service.Get(context.Background(), session.ID, uploadOwnerID)
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -308,7 +313,7 @@ func TestGetReconcilesUncertainConfirm(t *testing.T) {
 	store.failure = nil
 	store.existingFound = true
 	store.existingID = 77
-	view, err = service.Get(context.Background(), session.ID)
+	view, err = service.Get(context.Background(), session.ID, uploadOwnerID)
 	if err != nil {
 		t.Fatalf("reconcile get: %v", err)
 	}
@@ -324,22 +329,22 @@ func TestSessionExpires(t *testing.T) {
 		metadataBySeries: map[string]caseimport.SeriesMetadata{seriesA: metaA},
 	}
 	service := caseimport.NewServiceWithLimits(archive, &fakeStore{}, caseimport.Limits{SessionTTL: 5 * time.Millisecond, MaxSessions: 8, MaxSeries: 64})
-	session, err := service.Prepare(context.Background(), files(t, 2), 0)
+	session, err := service.Prepare(context.Background(), files(t, 2), 0, uploadOwnerID)
 	if err != nil {
 		t.Fatalf("prepare: %v", err)
 	}
 	time.Sleep(25 * time.Millisecond)
-	if _, err := service.Get(context.Background(), session.ID); !errors.Is(err, caseimport.ErrExpired) {
+	if _, err := service.Get(context.Background(), session.ID, uploadOwnerID); !errors.Is(err, caseimport.ErrExpired) {
 		t.Fatalf("want ErrExpired, got %v", err)
 	}
 }
 
 func TestDiscardRemovesSession(t *testing.T) {
 	service, _, _, session := preparedSession(t)
-	if err := service.Discard(context.Background(), session.ID); err != nil {
+	if err := service.Discard(context.Background(), session.ID, uploadOwnerID); err != nil {
 		t.Fatalf("discard: %v", err)
 	}
-	if _, err := service.Get(context.Background(), session.ID); !errors.Is(err, caseimport.ErrNotFound) {
+	if _, err := service.Get(context.Background(), session.ID, uploadOwnerID); !errors.Is(err, caseimport.ErrNotFound) {
 		t.Fatalf("want ErrNotFound, got %v", err)
 	}
 }
@@ -353,11 +358,119 @@ func TestConfirmRefusesSubsetOfExistingSeries(t *testing.T) {
 		metadataBySeries: map[string]caseimport.SeriesMetadata{seriesA: metaA},
 	}
 	service := caseimport.NewService(archive, &fakeStore{})
-	session, err := service.Prepare(context.Background(), files(t, 2), 0)
+	session, err := service.Prepare(context.Background(), files(t, 2), 0, uploadOwnerID)
 	if err != nil {
 		t.Fatalf("prepare: %v", err)
 	}
 	if session.Series[0].Suitable {
 		t.Fatal("a subset of an existing series must not be suitable")
+	}
+}
+
+// TestUploadSessionOwnership proves the user who prepared a session is the only
+// one who may read, confirm or discard it.
+func TestUploadSessionOwnership(t *testing.T) {
+	ctx := context.Background()
+	service, _, store, session := preparedSession(t)
+	key := session.Series[0].ID
+
+	if _, err := service.Get(ctx, session.ID, uploadOtherUserID); !errors.Is(err, caseimport.ErrForbidden) {
+		t.Fatalf("other Get error = %v, want ErrForbidden", err)
+	}
+	if _, err := service.Confirm(ctx, session.ID, key, uploadOtherUserID); !errors.Is(err, caseimport.ErrForbidden) {
+		t.Fatalf("other Confirm error = %v, want ErrForbidden", err)
+	}
+	if store.calls != 0 {
+		t.Fatalf("other user created %d cases", store.calls)
+	}
+	if err := service.Discard(ctx, session.ID, uploadOtherUserID); !errors.Is(err, caseimport.ErrForbidden) {
+		t.Fatalf("other Discard error = %v, want ErrForbidden", err)
+	}
+	if _, err := service.Get(ctx, session.ID, uploadOwnerID); err != nil {
+		t.Fatalf("owner Get after rejected discard: %v", err)
+	}
+
+	if _, err := service.Confirm(ctx, session.ID, key, uploadOwnerID); err != nil {
+		t.Fatalf("owner Confirm: %v", err)
+	}
+	if store.last.ActorUserID != uploadOwnerID {
+		t.Fatalf("import actor id = %d, want %d", store.last.ActorUserID, uploadOwnerID)
+	}
+	if _, err := service.Confirm(ctx, session.ID, key, uploadOtherUserID); !errors.Is(err, caseimport.ErrForbidden) {
+		t.Fatalf("other Confirm on a confirmed session error = %v, want ErrForbidden", err)
+	}
+	if _, err := service.Get(ctx, session.ID, uploadOtherUserID); !errors.Is(err, caseimport.ErrForbidden) {
+		t.Fatalf("other Get on a confirmed session error = %v, want ErrForbidden", err)
+	}
+	if err := service.Discard(ctx, session.ID, uploadOtherUserID); !errors.Is(err, caseimport.ErrForbidden) {
+		t.Fatalf("other Discard on a confirmed session error = %v, want ErrForbidden", err)
+	}
+	if _, err := service.Get(ctx, session.ID, uploadOwnerID); err != nil {
+		t.Fatalf("owner Get on a confirmed session: %v", err)
+	}
+}
+
+// TestUploadOwnerCheckedBeforeExpiry proves a non-owner learns nothing about a
+// live or expired session: the owner check runs before expiry.
+func TestUploadOwnerCheckedBeforeExpiry(t *testing.T) {
+	ctx := context.Background()
+	metaA, upA := sliceFixture(t, seriesA, studyA, uidSetA, []string{"id-a1", "id-a2"})
+	archive := &fakeArchive{
+		results:          []caseimport.UploadedInstance{upA[0], upA[1]},
+		metadataBySeries: map[string]caseimport.SeriesMetadata{seriesA: metaA},
+	}
+	service := caseimport.NewServiceWithLimits(archive, &fakeStore{}, caseimport.Limits{SessionTTL: 5 * time.Millisecond, MaxSessions: 8, MaxSeries: 64})
+	session, err := service.Prepare(ctx, files(t, 2), 0, uploadOwnerID)
+	if err != nil {
+		t.Fatalf("prepare: %v", err)
+	}
+	time.Sleep(25 * time.Millisecond)
+
+	if _, err := service.Get(ctx, session.ID, uploadOtherUserID); !errors.Is(err, caseimport.ErrForbidden) {
+		t.Fatalf("other Get of an expired session error = %v, want ErrForbidden", err)
+	}
+	if _, err := service.Confirm(ctx, session.ID, session.Series[0].ID, uploadOtherUserID); !errors.Is(err, caseimport.ErrForbidden) {
+		t.Fatalf("other Confirm of an expired session error = %v, want ErrForbidden", err)
+	}
+	if err := service.Discard(ctx, session.ID, uploadOtherUserID); !errors.Is(err, caseimport.ErrForbidden) {
+		t.Fatalf("other Discard of an expired session error = %v, want ErrForbidden", err)
+	}
+	if _, err := service.Get(ctx, session.ID, uploadOwnerID); !errors.Is(err, caseimport.ErrExpired) {
+		t.Fatalf("owner Get of an expired session error = %v, want ErrExpired", err)
+	}
+}
+
+// TestUploadRestoredSessionStaysOwned proves reconciliation of an uncertain
+// confirm stays scoped to the owner.
+func TestUploadRestoredSessionStaysOwned(t *testing.T) {
+	ctx := context.Background()
+	service, _, store, session := preparedSession(t)
+	store.failure = caseimport.Fail(caseimport.ErrCommitOutcomeUnknown, "commit outcome unknown")
+	if _, err := service.Confirm(ctx, session.ID, session.Series[0].ID, uploadOwnerID); !errors.Is(err, caseimport.ErrCommitOutcomeUnknown) {
+		t.Fatalf("confirm error = %v, want ErrCommitOutcomeUnknown", err)
+	}
+
+	if _, err := service.Get(ctx, session.ID, uploadOtherUserID); !errors.Is(err, caseimport.ErrForbidden) {
+		t.Fatalf("other Get error = %v, want ErrForbidden", err)
+	}
+	store.failure = nil
+	store.existingFound = true
+	store.existingID = 77
+	view, err := service.Get(ctx, session.ID, uploadOwnerID)
+	if err != nil {
+		t.Fatalf("owner reconcile Get: %v", err)
+	}
+	if view.CaseID != 77 || view.SelectedSeriesID != session.Series[0].ID {
+		t.Fatalf("owner reconciliation did not complete: %+v", view)
+	}
+}
+
+func TestPrepareRejectsInvalidUser(t *testing.T) {
+	service, _, store, _ := preparedSession(t)
+	if _, err := service.Prepare(context.Background(), files(t, 2), 0, 0); !errors.Is(err, caseimport.ErrInvalidInput) {
+		t.Fatalf("Prepare user 0 error = %v, want ErrInvalidInput", err)
+	}
+	if store.calls != 0 {
+		t.Fatalf("invalid user created %d cases", store.calls)
 	}
 }
